@@ -1,0 +1,9 @@
+[package]
+name = "mcriddle-daemon"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+clap = { version = "4.5.20", features = ["derive"] }
+mcriddle = { path = "../mcriddle" }
+tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
