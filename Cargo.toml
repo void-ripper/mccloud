@@ -5,7 +5,7 @@ opt-level = 1
 [profile.release]
 strip = true
 lto = true
-opt-level = 3
+opt-level = "z"
 
 [workspace.package]
 version = "0.1.0"
@@ -13,4 +13,4 @@ edition = "2021"
 
 [workspace]
 resolver = "2"
-members = ["mcriddle", "mcriddle-daemon"]
+members = [ "keys","mcriddle", "mcriddle-daemon"]

@@ -13,7 +13,8 @@ struct Args {
     log: String,
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let args = Args::parse();
     tracing_subscriber::fmt().with_env_filter(&args.log).init();
 
@@ -28,11 +29,11 @@ fn main() {
     };
     let peer01 = mcriddle::Peer::new(cfg).unwrap();
 
-    peer00.connect("127.0.0.1:39094".parse().unwrap());
+    peer00.connect("127.0.0.1:39094".parse().unwrap()).await;
 
     std::thread::sleep(Duration::from_secs(1));
 
-    peer01.share(b"hello".to_vec());
+    peer01.share(b"hello".to_vec()).await;
 
     std::thread::sleep(Duration::from_secs(1));
 

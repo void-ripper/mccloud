@@ -9,6 +9,7 @@ pub enum ErrorKind {
     Sync,
     Encryption,
     Blockchain,
+    Protocol,
 }
 
 #[derive(Debug)]
@@ -28,6 +29,16 @@ impl Error {
             line,
             module: module.into(),
             msg: None,
+        }
+    }
+
+    pub fn protocol(line: u32, module: &str, txt: &str) -> Self {
+        Self {
+            kind: ErrorKind::Protocol,
+            source: None,
+            line,
+            module: module.into(),
+            msg: Some(txt.into()),
         }
     }
 

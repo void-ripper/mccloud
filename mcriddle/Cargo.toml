@@ -9,6 +9,6 @@ borsh = { version = "1.5.1", features = ["borsh-derive", "derive"] }
 cbc = { version = "0.1.2", features = ["std"] }
 hex = "0.4.3"
 k256 = { version = "0.13.4", features = ["ecdh", "ecdsa"] }
-mio = { version = "1.0.2", features = ["net", "os-poll"] }
 rand = "0.8.5"
+tokio = { version = "1.41.1", features = ["full"] }
 tracing = "0.1.40"
