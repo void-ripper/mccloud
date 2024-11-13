@@ -3,8 +3,13 @@ name = "mcriddle-daemon"
 version.workspace = true
 edition.workspace = true
 
+[features]
+default = []
+ws = ["dep:tokio-tungstenite"]
+
 [dependencies]
 clap = { version = "4.5.20", features = ["derive"] }
 mcriddle = { path = "../mcriddle" }
 tokio = { version = "1.41.1", features = ["full"] }
+tokio-tungstenite = { version = "0.24.0", optional = true }
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }

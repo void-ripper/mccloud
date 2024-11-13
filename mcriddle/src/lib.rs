@@ -305,6 +305,10 @@ impl Peer {
         }))
     }
 
+    pub fn pubhex(&self) -> String {
+        hex::encode(self.pubkey)
+    }
+
     pub async fn connect(&self, addr: SocketAddr) {
         self.to_accept.send(addr).await.unwrap();
     }
