@@ -7,6 +7,8 @@ pub enum Message {
     Greeting {
         pubkey: PubKeyBytes,
         root: Option<[u8; 32]>,
+        last: Option<[u8; 32]>,
+        count: u64,
     },
     Announce {
         pubkey: PubKeyBytes,

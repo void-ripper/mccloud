@@ -3,10 +3,10 @@ use std::net::SocketAddr;
 use aes::cipher::{block_padding::Pkcs7, BlockDecryptMut, BlockEncryptMut, KeyIvInit};
 use k256::{
     ecdh::diffie_hellman,
+    elliptic_curve::rand_core::{OsRng, RngCore},
     sha2::{Digest, Sha256},
     PublicKey, SecretKey,
 };
-use rand::{rngs::OsRng, RngCore};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::tcp::{OwnedReadHalf, OwnedWriteHalf},

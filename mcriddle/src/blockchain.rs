@@ -6,8 +6,16 @@ use std::{
 };
 
 use borsh::{BorshDeserialize, BorshSerialize};
+use k256::{
+    ecdsa::SigningKey,
+    sha2::{Digest, Sha256},
+    SecretKey,
+};
 
-use crate::error::{Error, Result};
+use crate::{
+    error::{Error, Result},
+    HashBytes, PubKeyBytes, SignBytes,
+};
 
 #[derive(BorshDeserialize, BorshSerialize, Clone)]
 pub struct IndexEntry {
@@ -74,11 +82,11 @@ impl Iterator for BlockIterator {
 
 #[derive(BorshDeserialize, BorshSerialize, Clone)]
 pub struct Block {
-    pub parent: Option<[u8; 32]>,
-    pub hash: [u8; 32],
-    pub author: Vec<u8>,
-    pub sign: Vec<u8>,
-    pub data: Vec<u8>,
+    pub parent: Option<HashBytes>,
+    pub hash: HashBytes,
+    pub author: PubKeyBytes,
+    pub sign: SignBytes,
+    pub data: Vec<Vec<u8>>,
 }
 
 pub struct Blockchain {
@@ -87,6 +95,7 @@ pub struct Blockchain {
     pub cache: HashSet<Vec<u8>>,
     pub root: Option<[u8; 32]>,
     pub last: Option<[u8; 32]>,
+    pub count: u64,
     block_pos: u64,
 }
 
@@ -97,34 +106,70 @@ impl Blockchain {
         }
 
         let index_file = folder.join("index.db");
+        let db_file = folder.join("blocks.db");
 
-        let (root, last, block_pos) = if index_file.exists() {
+        let (root, last, block_pos, cnt) = if index_file.exists() {
             let mut it = IndexIterator::new(&index_file);
 
             let root = it.next().map(|n| n.hash);
-            let last = it.last();
+            let mut last = None;
+            let mut cnt = 0;
+
+            while let Some(idx) = it.next() {
+                last = Some(idx);
+                cnt += 1;
+            }
+
             let (last, block_pos) = if let Some(last) = last {
                 (Some(last.hash), last.pos + last.size)
             } else {
                 (None, 0)
             };
-            (root, last, block_pos)
+            (root, last, block_pos, cnt)
         } else {
-            (None, None, 0)
+            OpenOptions::new().create(true).write(true).open(&index_file).unwrap();
+            OpenOptions::new().create(true).write(true).open(&db_file).unwrap();
+            (None, None, 0, 0)
         };
 
         Self {
             index_file,
-            db_file: folder.join("blocks.db"),
+            db_file,
             cache: HashSet::new(),
             root,
             last,
+            count: cnt,
             block_pos,
         }
     }
 
     pub fn get_blocks(&self, start: Option<[u8; 32]>) -> BlockIterator {
         BlockIterator::new(&self.index_file, &self.db_file, start)
+    }
+
+    pub fn create_block(&mut self, pubkey: PubKeyBytes, secret: &SecretKey) -> Block {
+        let data: Vec<Vec<u8>> = self.cache.drain().collect();
+        let signer = SigningKey::from(secret);
+        let mut hsh = Sha256::new();
+
+        for d in data.iter() {
+            hsh.update(d);
+        }
+
+        let hash = hsh.finalize().to_vec();
+        let mut hshbytes = [0u8; 32];
+        hshbytes.copy_from_slice(&hash);
+        let (sign, _) = signer.sign_prehash_recoverable(&hash).unwrap();
+        let mut signbytes = [0u8; 64];
+        signbytes.copy_from_slice(&sign.to_bytes());
+
+        Block {
+            parent: self.last.clone(),
+            author: pubkey,
+            data,
+            hash: hshbytes,
+            sign: signbytes,
+        }
     }
 
     pub fn add_block(&mut self, blk: Block) -> Result<()> {
@@ -137,6 +182,7 @@ impl Blockchain {
         }
 
         self.last = Some(blk.hash);
+        self.count += 1;
 
         let data = borsh::to_vec(&blk).map_err(|e| Error::io(line!(), module_path!(), e))?;
         let idx = IndexEntry {

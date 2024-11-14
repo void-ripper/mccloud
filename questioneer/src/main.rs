@@ -7,9 +7,10 @@ use ratatui::{
     crossterm::event::{self, KeyCode, KeyEventKind},
     layout::{Constraint, Flex, Layout, Rect},
     style::Stylize,
-    text::{Line, Text},
-    widgets::{Block, BorderType, Paragraph, Widget},
+    text::Line,
+    widgets::{Block, Paragraph, Widget},
 };
+use tokio::runtime::Runtime;
 
 fn center(area: Rect, horizontal: Constraint, vertical: Constraint) -> Rect {
     let [area] = Layout::horizontal([horizontal]).flex(Flex::Center).areas(area);
@@ -18,6 +19,7 @@ fn center(area: Rect, horizontal: Constraint, vertical: Constraint) -> Rect {
 }
 
 struct App {
+    rt: Runtime,
     show_popup: bool,
     show_message: bool,
     peers: IndexMap<String, Arc<Peer>>,
@@ -34,7 +36,7 @@ impl App {
         };
         self.port_pool += 1;
 
-        let p = Peer::new(cfg).unwrap();
+        let p = self.rt.block_on(async { Peer::new(cfg).unwrap() });
         self.peers.insert(p.pubhex(), p);
     }
 
@@ -86,6 +88,14 @@ impl App {
             Paragraph::new("").block(block).render(layout[0], buf);
 
             let block = Block::bordered().title(" Data ");
+            let mut lines: Vec<Line> = Vec::new();
+            let it = self.rt.block_on(peer.block_it());
+            for blk in it {
+                lines.push(hex::encode(&blk.hash).into());
+                for d in blk.data.iter() {
+                    lines.push(format!("+ {}", String::from_utf8_lossy(d)).into());
+                }
+            }
             Paragraph::new("").block(block).render(layout[1], buf);
         }
     }
@@ -122,11 +132,12 @@ impl Widget for &App {
     }
 }
 
-#[tokio::main]
-async fn main() {
+fn main() {
+    let rt = Runtime::new().unwrap();
     let mut term = ratatui::init();
 
     let mut app = App {
+        rt,
         show_popup: false,
         show_message: false,
         peers: IndexMap::new(),
@@ -151,9 +162,10 @@ async fn main() {
                                 app.message_input.push(a);
                             }
                             KeyCode::Enter => {
-                                app.peers[app.selected]
-                                    .share(app.message_input.as_bytes().to_vec())
-                                    .await;
+                                let _ = app
+                                    .rt
+                                    .block_on(app.peers[app.selected].share(app.message_input.as_bytes().to_vec()));
+
                                 app.show_message = false;
                                 app.message_input.clear();
                             }
