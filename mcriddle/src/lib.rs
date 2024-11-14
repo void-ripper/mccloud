@@ -4,7 +4,7 @@ use std::{
     path::PathBuf,
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc, Weak,
+        Arc,
     },
 };
 
@@ -47,8 +47,8 @@ pub struct Config {
 type Clients = HashMap<PubKeyBytes, Arc<Mutex<Client>>>;
 
 pub struct Peer {
-    me: Weak<Peer>,
-    cfg: Config,
+    // me: Weak<Peer>,
+    pub cfg: Config,
     prikey: SecretKey,
     pubkey: PubKeyBytes,
     pubhex: String,
@@ -72,8 +72,9 @@ impl Peer {
         let mut pubhex: String = hex::encode(&pubkey);
         pubhex.truncate(12);
 
-        let peer = Arc::new_cyclic(|me| Self {
-            me: me.clone(),
+        // let peer = Arc::new_cyclic(|me| Self {
+        let peer = Arc::new(Self {
+            // me: me.clone(),
             prikey,
             pubkey,
             pubhex,
@@ -187,7 +188,7 @@ impl Peer {
                 if self.pubkey > pubkey {
                     tracing::info!("{} create genesis block", self.pubhex);
                     let blk = blkch.create_block(self.pubkey.clone(), &self.prikey);
-                    blkch.add_block(blk.clone());
+                    guard!(blkch.add_block(blk.clone()), source);
 
                     guard!(cl.write(&Message::ShareBlock { block: blk }).await, source);
                 }

@@ -1,7 +1,7 @@
 use std::{
     collections::HashSet,
     fs::{File, OpenOptions},
-    io::{BufReader, Read, Seek},
+    io::{BufReader, Read, Seek, Write},
     path::PathBuf,
 };
 
@@ -14,7 +14,7 @@ use k256::{
 
 use crate::{
     error::{Error, Result},
-    HashBytes, PubKeyBytes, SignBytes,
+    guard, HashBytes, PubKeyBytes, SignBytes,
 };
 
 #[derive(BorshDeserialize, BorshSerialize, Clone)]
@@ -184,7 +184,7 @@ impl Blockchain {
         self.last = Some(blk.hash);
         self.count += 1;
 
-        let data = borsh::to_vec(&blk).map_err(|e| Error::io(line!(), module_path!(), e))?;
+        let data = guard!(borsh::to_vec(&blk), io);
         let idx = IndexEntry {
             hash: blk.hash,
             pos: self.block_pos,
@@ -193,19 +193,13 @@ impl Blockchain {
         self.block_pos += idx.size;
 
         {
-            let idx_file = OpenOptions::new()
-                .append(true)
-                .open(&self.index_file)
-                .map_err(|e| Error::io(line!(), module_path!(), e))?;
-            borsh::to_writer(idx_file, &idx).map_err(|e| Error::io(line!(), module_path!(), e))?;
+            let idx_file = guard!(OpenOptions::new().append(true).open(&self.index_file), io);
+            guard!(borsh::to_writer(idx_file, &idx), io);
         }
 
         {
-            let db_file = OpenOptions::new()
-                .append(true)
-                .open(&self.db_file)
-                .map_err(|e| Error::io(line!(), module_path!(), e))?;
-            borsh::to_writer(db_file, &data).map_err(|e| Error::io(line!(), module_path!(), e))?;
+            let mut db_file = guard!(OpenOptions::new().append(true).open(&self.db_file), io);
+            guard!(db_file.write_all(&data), io);
         }
 
         Ok(())
