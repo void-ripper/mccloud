@@ -38,18 +38,23 @@ impl Iterator for IndexIterator {
 
 pub struct BlockIterator {
     file: File,
-    start: Option<[u8; 32]>,
     index_it: IndexIterator,
 }
 
 impl BlockIterator {
     pub fn new(index: &PathBuf, db: &PathBuf, start: Option<[u8; 32]>) -> Self {
         let file = File::open(db).unwrap();
-        Self {
-            file,
-            start,
-            index_it: IndexIterator::new(index),
+        let mut index_it = IndexIterator::new(index);
+
+        if let Some(start) = start {
+            while let Some(i) = index_it.next() {
+                if i.hash == start {
+                    break;
+                }
+            }
         }
+
+        Self { file, index_it }
     }
 }
 
