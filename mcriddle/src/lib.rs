@@ -208,11 +208,15 @@ impl Peer {
                 root.as_ref().map(|r| hex::encode(r)).unwrap_or("".into()),
                 count
             );
+            cl.pubkey = pubkey.clone();
+            cl.shared_secret(&self.prikey);
+
             let mut blkch = self.blockchain.lock().await;
 
             if root.is_none() && blkch.root.is_none() {
                 if self.pubkey > pubkey {
                     tracing::info!("{} create genesis block", self.pubhex);
+                    blkch.cache.insert(b"[genesis]".to_vec());
                     let blk = blkch.create_block(self.pubkey.clone(), &self.prikey);
                     guard!(blkch.add_block(blk.clone()), source);
 
@@ -229,8 +233,6 @@ impl Peer {
                     source
                 );
             }
-            cl.pubkey = pubkey.clone();
-            cl.shared_secret(&self.prikey);
         } else {
             return Err(Error::protocol(
                 line!(),
