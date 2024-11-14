@@ -8,7 +8,7 @@ use ratatui::{
     layout::{Constraint, Flex, Layout, Rect},
     style::Stylize,
     text::Line,
-    widgets::{Block, Paragraph, Widget},
+    widgets::{Block, Clear, Paragraph, Widget},
 };
 use tokio::runtime::Runtime;
 
@@ -64,11 +64,13 @@ impl App {
             " m: send message".into(),
             " q: quit app".into(),
         ];
+        Clear.render(loc, buf);
         Paragraph::new(lines).block(block).render(loc, buf);
     }
 
     fn show_message(&self, area: Rect, buf: &mut Buffer) {
         let block = Block::bordered().title(" Message ");
+        Clear.render(area, buf);
         Paragraph::new(self.message_input.as_str())
             .block(block)
             .render(area, buf);
