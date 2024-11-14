@@ -111,9 +111,9 @@ impl Blockchain {
         let (root, last, block_pos, cnt) = if index_file.exists() {
             let mut it = IndexIterator::new(&index_file);
 
-            let root = it.next().map(|n| n.hash);
-            let mut last = None;
-            let mut cnt = 0;
+            let mut last = it.next();
+            let root = last.as_ref().map(|n| n.hash);
+            let mut cnt = if root.is_some() { 1 } else { 0 };
 
             while let Some(idx) = it.next() {
                 last = Some(idx);

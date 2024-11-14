@@ -72,6 +72,23 @@ impl Peer {
         let mut pubhex: String = hex::encode(&pubkey);
         pubhex.truncate(12);
 
+        tracing::info!(
+            "root block {}",
+            blockchain
+                .root
+                .as_ref()
+                .map(|r| hex::encode(r))
+                .unwrap_or(String::new())
+        );
+        tracing::info!(
+            "last block {} {}",
+            blockchain.count,
+            blockchain
+                .last
+                .as_ref()
+                .map(|r| hex::encode(r))
+                .unwrap_or(String::new())
+        );
         // let peer = Arc::new_cyclic(|me| Self {
         let peer = Arc::new(Self {
             // me: me.clone(),
@@ -184,6 +201,13 @@ impl Peer {
             count,
         } = greeting
         {
+            tracing::info!(
+                "{} greeting {} {} {}",
+                self.pubhex,
+                hex::encode(&pubkey),
+                root.as_ref().map(|r| hex::encode(r)).unwrap_or("".into()),
+                count
+            );
             let mut blkch = self.blockchain.lock().await;
 
             if root.is_none() && blkch.root.is_none() {
