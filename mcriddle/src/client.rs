@@ -53,7 +53,7 @@ impl Client {
             let size = (encrypted.len() as u32).to_le_bytes();
             guard!(self.sck.write(&size).await, io);
             guard!(self.sck.write(&iv).await, io);
-            guard!(self.sck.write_all(&data).await, io);
+            guard!(self.sck.write_all(&encrypted).await, io);
         } else {
             let size = (data.len() as u32).to_ne_bytes();
             guard!(self.sck.write(&size).await, io);

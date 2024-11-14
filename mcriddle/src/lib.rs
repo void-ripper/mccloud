@@ -138,7 +138,9 @@ impl Peer {
                 }
                 msg = to_handle.recv() => {
                     if let Some((msg, cl)) = msg {
-                        guard!(self.on_message(msg,cl ).await, source);
+                        if let Err(e) = self.on_message(msg,cl ).await {
+                            tracing::error!("{e}");
+                        }
                     }
                 }
             }
@@ -253,15 +255,19 @@ impl Peer {
             }
             Message::Announce { pubkey } => {
                 if pubkey != self.pubkey && self.known.lock().await.insert(pubkey.clone()) {
+                    tracing::info!("{} accept {}", self.pubhex, hex::encode(&pubkey));
                     let msg = Message::Announce { pubkey };
                     guard!(self.broadcast_except(msg, &cl).await, source);
                 }
             }
             Message::Remove { pubkey } => {
+                tracing::info!("{} remove {}", self.pubhex, hex::encode(&pubkey));
                 let msg = Message::Remove { pubkey };
                 guard!(self.broadcast_except(msg, &cl).await, source);
             }
             Message::ShareData { data } => {
+                tracing::info!("{} got data", self.pubhex);
+
                 let unknown = self.blockchain.lock().await.cache.insert(data.clone());
                 if unknown {
                     let msg = Message::ShareData { data };
@@ -276,9 +282,11 @@ impl Peer {
                 }
             }
             Message::RequestedBlock { block } => {
+                tracing::info!("{} got block {}", self.pubhex, hex::encode(&block.hash));
                 guard!(self.blockchain.lock().await.add_block(block), source);
             }
             Message::ShareBlock { block } => {
+                tracing::info!("{} share block {}", self.pubhex, hex::encode(&block.hash));
                 guard!(self.blockchain.lock().await.add_block(block.clone()), source);
 
                 guard!(self.broadcast_except(Message::ShareBlock { block }, &cl).await, source);
