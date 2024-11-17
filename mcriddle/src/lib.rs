@@ -69,8 +69,7 @@ impl Peer {
         let blockchain = Blockchain::new(&cfg.folder);
         let (mtx, mrx) = mpsc::channel(10);
 
-        let mut pubhex: String = hex::encode(&pubkey);
-        pubhex.truncate(12);
+        let pubhex: String = hex::encode(&pubkey);
 
         tracing::info!(
             "root block {}",

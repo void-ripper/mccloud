@@ -117,7 +117,7 @@ impl App {
                     lines.push(format!("+ {}", String::from_utf8_lossy(d)).into());
                 }
             }
-            Paragraph::new("").block(block).render(layout[1], buf);
+            Paragraph::new(lines).block(block).render(layout[1], buf);
         }
     }
 
