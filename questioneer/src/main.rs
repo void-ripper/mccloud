@@ -1,4 +1,4 @@
-use std::{net::SocketAddr, path::PathBuf, sync::Arc};
+use std::{collections::HashSet, net::SocketAddr, path::PathBuf, sync::Arc};
 
 use indexmap::IndexMap;
 use mcriddle::{Config, Peer};
@@ -105,8 +105,13 @@ impl App {
 
             let layout = Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)]).split(layout[1]);
 
-            let block = Block::bordered().title(" Connections ");
-            Paragraph::new("").block(block).render(layout[0], buf);
+            let block = Block::bordered().title(" known ");
+            let mut lines: Vec<Line> = Vec::new();
+            let known = self.rt.block_on(peer.known_pubkeys());
+            for k in known {
+                lines.push(hex::encode(k).into());
+            }
+            Paragraph::new(lines).block(block).render(layout[0], buf);
 
             let block = Block::bordered().title(" Data ");
             let mut lines: Vec<Line> = Vec::new();
@@ -219,12 +224,22 @@ impl Widget for &App {
         let block = Block::bordered().title(title.centered()); //.border_type(BorderType::Thick);
         let mut peers: Vec<Line> = Vec::new();
 
+        let clients: HashSet<String> = {
+            if let Some((_, peer)) = self.peers.get_index(self.selected) {
+                let clients = self.rt.block_on(peer.client_pubkeys());
+                clients.into_iter().map(|n| hex::encode(n)).collect()
+            } else {
+                HashSet::new()
+            }
+        };
         for (idx, p) in self.peers.keys().enumerate() {
             if idx == self.selected {
                 peers.push(p.as_str().bold().on_light_blue().into());
             } else {
                 if self.mode == Mode::Connect && self.select_conn == idx {
                     peers.push(p.as_str().gray().on_light_yellow().into());
+                } else if clients.contains(p) {
+                    peers.push(p.as_str().gray().on_light_green().into());
                 } else {
                     peers.push(p.as_str().into());
                 }

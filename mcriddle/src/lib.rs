@@ -325,6 +325,15 @@ impl Peer {
         self.pubhex.clone()
     }
 
+    pub async fn client_pubkeys(&self) -> HashSet<PubKeyBytes> {
+        let cl = self.clients.lock().await;
+        cl.keys().cloned().collect()
+    }
+
+    pub async fn known_pubkeys(&self) -> HashSet<PubKeyBytes> {
+        self.known.lock().await.clone()
+    }
+
     pub async fn connect(&self, addr: SocketAddr) -> Result<()> {
         tracing::info!("{} connect to {}", self.pubhex, addr);
         let sck = guard!(TcpStream::connect(addr).await, io);
