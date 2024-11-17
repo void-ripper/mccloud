@@ -51,7 +51,7 @@ pub struct BlockIterator {
 }
 
 impl BlockIterator {
-    pub fn new(index: &PathBuf, db: &PathBuf, start: Option<[u8; 32]>) -> Self {
+    pub fn new(index: &PathBuf, db: &PathBuf, start: Option<HashBytes>) -> Self {
         let file = File::open(db).unwrap();
         let mut index_it = IndexIterator::new(index);
 
@@ -103,9 +103,9 @@ pub struct Blockchain {
 }
 
 impl Blockchain {
-    pub fn new(folder: &PathBuf) -> Self {
+    pub fn new(folder: &PathBuf) -> Result<Self> {
         if !folder.exists() {
-            std::fs::create_dir_all(&folder).unwrap();
+            guard!(std::fs::create_dir_all(&folder), io);
         }
 
         let index_file = folder.join("index.db");
@@ -124,10 +124,10 @@ impl Blockchain {
             }
 
             let (last, next, block_pos) = if let Some(last) = last {
-                let mut file = File::open(&db_file).unwrap();
-                file.seek(SeekFrom::Start(last.pos));
+                let mut file = guard!(File::open(&db_file), io);
+                guard!(file.seek(SeekFrom::Start(last.pos)), io);
                 let mut buffer = vec![0u8; last.size as _];
-                file.read_exact(&mut buffer);
+                guard!(file.read_exact(&mut buffer), io);
                 let blk: Block = borsh::from_slice(&buffer).unwrap();
 
                 (Some(last.hash), Some(blk.next_choice), last.pos + last.size)
@@ -136,12 +136,12 @@ impl Blockchain {
             };
             (root, last, block_pos, cnt, next)
         } else {
-            OpenOptions::new().create(true).write(true).open(&index_file).unwrap();
-            OpenOptions::new().create(true).write(true).open(&db_file).unwrap();
+            guard!(OpenOptions::new().create(true).write(true).open(&index_file), io);
+            guard!(OpenOptions::new().create(true).write(true).open(&db_file), io);
             (None, None, 0, 0, None)
         };
 
-        Self {
+        Ok(Self {
             index_file,
             db_file,
             cache: HashSet::new(),
@@ -150,7 +150,7 @@ impl Blockchain {
             next_author: next,
             count: cnt,
             block_pos,
-        }
+        })
     }
 
     pub fn get_blocks(&self, start: Option<[u8; 32]>) -> BlockIterator {

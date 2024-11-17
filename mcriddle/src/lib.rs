@@ -68,7 +68,7 @@ impl Peer {
         pubkey.copy_from_slice(prikey.public_key().to_encoded_point(true).as_bytes());
         let to_shutdown = Arc::new(AtomicBool::new(false));
 
-        let blockchain = Blockchain::new(&cfg.folder);
+        let blockchain = guard!(Blockchain::new(&cfg.folder), source);
         let (mtx, mrx) = mpsc::channel(10);
 
         let pubhex: String = hex::encode(&pubkey);
