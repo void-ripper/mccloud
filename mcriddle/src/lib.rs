@@ -4,13 +4,15 @@ use std::{
     path::PathBuf,
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc,
+        Arc, Weak,
     },
+    time::Duration,
 };
 
-use blockchain::{BlockIterator, Blockchain};
+use blockchain::{Block, BlockIterator, Blockchain};
 use client::Client;
 use error::{Error, Result};
+use indexmap::IndexSet;
 use k256::{
     elliptic_curve::{rand_core::OsRng, sec1::ToEncodedPoint},
     SecretKey,
@@ -47,7 +49,7 @@ pub struct Config {
 type Clients = HashMap<PubKeyBytes, Arc<Mutex<Client>>>;
 
 pub struct Peer {
-    // me: Weak<Peer>,
+    me: Weak<Peer>,
     pub cfg: Config,
     prikey: SecretKey,
     pubkey: PubKeyBytes,
@@ -55,7 +57,7 @@ pub struct Peer {
     to_handle_tx: mpsc::Sender<(Message, Arc<Mutex<Client>>)>,
     to_shutdown: Arc<AtomicBool>,
     clients: Mutex<Clients>,
-    known: Mutex<HashSet<PubKeyBytes>>,
+    known: Mutex<IndexSet<PubKeyBytes>>,
     blockchain: Mutex<Blockchain>,
 }
 
@@ -88,9 +90,9 @@ impl Peer {
                 .map(|r| hex::encode(r))
                 .unwrap_or(String::new())
         );
-        // let peer = Arc::new_cyclic(|me| Self {
-        let peer = Arc::new(Self {
-            // me: me.clone(),
+        let peer = Arc::new_cyclic(|me| Self {
+            // let peer = Arc::new(Self {
+            me: me.clone(),
             prikey,
             pubkey,
             pubhex,
@@ -98,7 +100,7 @@ impl Peer {
             to_handle_tx: mtx,
             to_shutdown,
             clients: Mutex::new(HashMap::new()),
-            known: Mutex::new(HashSet::new()),
+            known: Mutex::new(IndexSet::new()),
             blockchain: Mutex::new(blockchain),
         });
 
@@ -181,11 +183,13 @@ impl Peer {
 
         let greeting = {
             let blkch = self.blockchain.lock().await;
+            let known = self.known.lock().await.iter().cloned().collect();
             Message::Greeting {
                 pubkey: self.pubkey.clone(),
                 root: blkch.root.clone(),
                 last: blkch.last.clone(),
                 count: blkch.count,
+                known,
             }
         };
 
@@ -198,6 +202,7 @@ impl Peer {
             root,
             last,
             count,
+            known,
         } = greeting
         {
             tracing::info!(
@@ -210,15 +215,22 @@ impl Peer {
             cl.pubkey = pubkey.clone();
             cl.shared_secret(&self.prikey);
 
+            {
+                let mut kn = self.known.lock().await;
+                if kn.insert(pubkey.clone()) {
+                    let msg = Message::Announce { pubkey };
+                    guard!(self.broadcast(msg).await, source);
+                }
+                kn.extend(known);
+                kn.shift_remove(&self.pubkey);
+            }
             let mut blkch = self.blockchain.lock().await;
 
             if root.is_none() && blkch.root.is_none() {
                 if self.pubkey > pubkey {
                     tracing::info!("{} create genesis block", self.pubhex);
                     blkch.cache.insert(b"[genesis]".to_vec());
-                    let blk = blkch.create_block(self.pubkey.clone(), &self.prikey);
-                    guard!(blkch.add_block(blk.clone()), source);
-
+                    let blk = guard!(self.create_next_block(&mut *blkch).await, source);
                     guard!(cl.write(&Message::ShareBlock { block: blk }).await, source);
                 }
             } else if blkch.root.is_none() {
@@ -246,11 +258,6 @@ impl Peer {
         let to_handle = self.to_handle_tx.clone();
         let cl = Arc::new(Mutex::new(cl));
 
-        if pubkey != self.pubkey && self.known.lock().await.insert(pubkey.clone()) {
-            let msg = Message::Announce { pubkey };
-            guard!(self.broadcast(msg).await, source);
-        }
-
         let cl0 = cl.clone();
         self.clients.lock().await.insert(pubkey, cl0);
 
@@ -271,6 +278,17 @@ impl Peer {
         });
 
         Ok(())
+    }
+
+    async fn create_next_block(&self, blkch: &mut Blockchain) -> Result<Block> {
+        let next_author = {
+            let k = self.known.lock().await;
+            k[rand::random::<usize>() % k.len()]
+        };
+        let blk = blkch.create_block(next_author, self.pubkey.clone(), &self.prikey);
+        guard!(blkch.add_block(blk.clone()), source);
+
+        Ok(blk)
     }
 
     async fn on_message(&self, msg: Message, cl: Arc<Mutex<Client>>) -> Result<()> {
@@ -312,6 +330,33 @@ impl Peer {
             }
             Message::ShareBlock { block } => {
                 tracing::info!("{} share block {}", self.pubhex, hex::encode(&block.hash));
+
+                if self.pubkey == block.next_choice {
+                    tracing::info!("{} me is next xD", self.pubhex);
+
+                    let peer = self.me.upgrade().unwrap();
+                    tokio::spawn(async move {
+                        let res: Result<()> = async {
+                            loop {
+                                tokio::time::sleep(Duration::from_millis(1_000)).await;
+
+                                let mut blkch = peer.blockchain.lock().await;
+                                if blkch.cache.len() > 0 {
+                                    let block = guard!(peer.create_next_block(&mut *blkch).await, source);
+                                    guard!(peer.broadcast(Message::ShareBlock { block }).await, source);
+                                    break;
+                                }
+                            }
+
+                            Ok(())
+                        }
+                        .await;
+
+                        if let Err(e) = res {
+                            tracing::error!("{e}");
+                        }
+                    });
+                }
                 guard!(self.blockchain.lock().await.add_block(block.clone()), source);
 
                 guard!(self.broadcast_except(Message::ShareBlock { block }, &cl).await, source);
@@ -330,7 +375,7 @@ impl Peer {
         cl.keys().cloned().collect()
     }
 
-    pub async fn known_pubkeys(&self) -> HashSet<PubKeyBytes> {
+    pub async fn known_pubkeys(&self) -> IndexSet<PubKeyBytes> {
         self.known.lock().await.clone()
     }
 

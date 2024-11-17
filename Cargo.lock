@@ -808,7 +808,9 @@ dependencies = [
  "borsh",
  "cbc",
  "hex",
+ "indexmap",
  "k256",
+ "rand",
  "tokio",
  "tracing",
 ]

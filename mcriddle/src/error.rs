@@ -1,5 +1,7 @@
 use std::fmt::Display;
 
+use crate::{HashBytes, PubKeyBytes};
+
 pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug, Copy, Clone)]
@@ -92,13 +94,27 @@ impl Error {
         }
     }
 
-    pub fn non_child_block(line: u32, module: &str, hsh: [u8; 32]) -> Self {
+    pub fn non_child_block(line: u32, module: &str, hsh: HashBytes) -> Self {
         Self {
             source: None,
             kind: ErrorKind::Blockchain,
             line,
             module: module.into(),
             msg: Some(format!("block ({}) is not child of current block", hex::encode(hsh))),
+        }
+    }
+
+    pub fn unexpected_block_author(line: u32, module: &str, hsh: &HashBytes, author: &PubKeyBytes) -> Self {
+        Self {
+            source: None,
+            kind: ErrorKind::Blockchain,
+            line,
+            module: module.into(),
+            msg: Some(format!(
+                "block ({}) has unexpected author {}",
+                hex::encode(hsh),
+                hex::encode(author)
+            )),
         }
     }
 }

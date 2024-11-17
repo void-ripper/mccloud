@@ -1,7 +1,7 @@
 use std::{
     collections::HashSet,
     fs::{File, OpenOptions},
-    io::{BufReader, Read, Seek, Write},
+    io::{BufReader, Read, Seek, SeekFrom, Write},
     path::PathBuf,
 };
 
@@ -19,7 +19,7 @@ use crate::{
 
 #[derive(BorshDeserialize, BorshSerialize, Clone)]
 pub struct IndexEntry {
-    hash: [u8; 32],
+    hash: HashBytes,
     pos: u64,
     size: u64,
 }
@@ -84,17 +84,19 @@ impl Iterator for BlockIterator {
 pub struct Block {
     pub parent: Option<HashBytes>,
     pub hash: HashBytes,
+    pub data: Vec<Vec<u8>>,
+    pub next_choice: PubKeyBytes,
     pub author: PubKeyBytes,
     pub sign: SignBytes,
-    pub data: Vec<Vec<u8>>,
 }
 
 pub struct Blockchain {
     index_file: PathBuf,
     db_file: PathBuf,
     pub cache: HashSet<Vec<u8>>,
-    pub root: Option<[u8; 32]>,
-    pub last: Option<[u8; 32]>,
+    pub root: Option<HashBytes>,
+    pub last: Option<HashBytes>,
+    next_author: Option<PubKeyBytes>,
     pub count: u64,
     block_pos: u64,
 }
@@ -108,7 +110,7 @@ impl Blockchain {
         let index_file = folder.join("index.db");
         let db_file = folder.join("blocks.db");
 
-        let (root, last, block_pos, cnt) = if index_file.exists() {
+        let (root, last, block_pos, cnt, next) = if index_file.exists() {
             let mut it = IndexIterator::new(&index_file);
 
             let mut last = it.next();
@@ -120,16 +122,22 @@ impl Blockchain {
                 cnt += 1;
             }
 
-            let (last, block_pos) = if let Some(last) = last {
-                (Some(last.hash), last.pos + last.size)
+            let (last, next, block_pos) = if let Some(last) = last {
+                let mut file = File::open(&db_file).unwrap();
+                file.seek(SeekFrom::Start(last.pos));
+                let mut buffer = vec![0u8; last.size as _];
+                file.read_exact(&mut buffer);
+                let blk: Block = borsh::from_slice(&buffer).unwrap();
+
+                (Some(last.hash), Some(blk.next_choice), last.pos + last.size)
             } else {
-                (None, 0)
+                (None, None, 0)
             };
-            (root, last, block_pos, cnt)
+            (root, last, block_pos, cnt, next)
         } else {
             OpenOptions::new().create(true).write(true).open(&index_file).unwrap();
             OpenOptions::new().create(true).write(true).open(&db_file).unwrap();
-            (None, None, 0, 0)
+            (None, None, 0, 0, None)
         };
 
         Self {
@@ -138,6 +146,7 @@ impl Blockchain {
             cache: HashSet::new(),
             root,
             last,
+            next_author: next,
             count: cnt,
             block_pos,
         }
@@ -147,11 +156,16 @@ impl Blockchain {
         BlockIterator::new(&self.index_file, &self.db_file, start)
     }
 
-    pub fn create_block(&mut self, pubkey: PubKeyBytes, secret: &SecretKey) -> Block {
+    pub fn create_block(&mut self, next: PubKeyBytes, pubkey: PubKeyBytes, secret: &SecretKey) -> Block {
         let data: Vec<Vec<u8>> = self.cache.drain().collect();
         let signer = SigningKey::from(secret);
         let mut hsh = Sha256::new();
 
+        if let Some(parent) = &self.last {
+            hsh.update(parent);
+        }
+        hsh.update(&pubkey);
+        hsh.update(&next);
         for d in data.iter() {
             hsh.update(d);
         }
@@ -166,6 +180,7 @@ impl Blockchain {
         Block {
             parent: self.last.clone(),
             author: pubkey,
+            next_choice: next,
             data,
             hash: hshbytes,
             sign: signbytes,
@@ -177,8 +192,23 @@ impl Blockchain {
             return Err(Error::non_child_block(line!(), module_path!(), blk.hash));
         }
 
+        if let Some(next) = &self.next_author {
+            if blk.author != *next {
+                return Err(Error::unexpected_block_author(
+                    line!(),
+                    module_path!(),
+                    &blk.hash,
+                    &blk.author,
+                ));
+            }
+        }
+
         if self.root.is_none() {
             self.root = Some(blk.hash);
+        }
+
+        for d in blk.data.iter() {
+            self.cache.remove(d);
         }
 
         self.last = Some(blk.hash);

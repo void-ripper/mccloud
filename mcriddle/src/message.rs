@@ -1,14 +1,15 @@
 use borsh::{BorshDeserialize, BorshSerialize};
 
-use crate::{blockchain::Block, PubKeyBytes};
+use crate::{blockchain::Block, HashBytes, PubKeyBytes};
 
 #[derive(BorshSerialize, BorshDeserialize)]
 pub enum Message {
     Greeting {
         pubkey: PubKeyBytes,
-        root: Option<[u8; 32]>,
-        last: Option<[u8; 32]>,
+        root: Option<HashBytes>,
+        last: Option<HashBytes>,
         count: u64,
+        known: Vec<PubKeyBytes>,
     },
     Announce {
         pubkey: PubKeyBytes,
@@ -20,7 +21,7 @@ pub enum Message {
         data: Vec<u8>,
     },
     RequestBlocks {
-        start: Option<[u8; 32]>,
+        start: Option<HashBytes>,
     },
     RequestedBlock {
         block: Block,

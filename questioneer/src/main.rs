@@ -218,7 +218,7 @@ impl Widget for &App {
         Self: Sized,
     {
         let status_layout = Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).split(area);
-        let layout = Layout::horizontal([Constraint::Percentage(20), Constraint::Min(1)]).split(status_layout[0]);
+        let layout = Layout::horizontal([Constraint::Percentage(25), Constraint::Min(1)]).split(status_layout[0]);
 
         let title = Line::from(" Peers ".bold());
         let block = Block::bordered().title(title.centered()); //.border_type(BorderType::Thick);
