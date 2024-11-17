@@ -40,7 +40,8 @@ impl Iterator for IndexIterator {
     type Item = IndexEntry;
 
     fn next(&mut self) -> Option<Self::Item> {
-        borsh::from_reader::<_, IndexEntry>(&mut self.file).ok()
+        // borsh::from_reader::<_, IndexEntry>(&mut self.file).ok()
+        IndexEntry::deserialize_reader(&mut self.file).ok()
     }
 }
 
