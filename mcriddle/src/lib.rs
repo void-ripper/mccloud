@@ -397,7 +397,7 @@ impl Peer {
         Ok(())
     }
 
-    pub async fn block_it(&self) -> BlockIterator {
+    pub async fn block_iter(&self) -> BlockIterator {
         self.blockchain.lock().await.get_blocks(None)
     }
 

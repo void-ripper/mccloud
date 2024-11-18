@@ -115,7 +115,7 @@ impl App {
 
             let block = Block::bordered().title(" Data ");
             let mut lines: Vec<Line> = Vec::new();
-            let it = self.rt.block_on(peer.block_it());
+            let it = self.rt.block_on(peer.block_iter());
             for blk in it {
                 lines.push(hex::encode(&blk.hash).into());
                 for d in blk.data.iter() {
