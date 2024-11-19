@@ -321,6 +321,7 @@ impl Peer {
                 let blk_it = self.blockchain.lock().await.get_blocks(start);
                 let mut cl = cl.lock().await;
                 for block in blk_it {
+                    let block = guard!(block, source);
                     guard!(cl.write(&Message::RequestedBlock { block }).await, source);
                 }
             }

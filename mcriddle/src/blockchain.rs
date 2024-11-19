@@ -46,13 +46,14 @@ impl Iterator for IndexIterator {
 }
 
 pub struct BlockIterator {
-    file: File,
+    file: BufReader<File>,
     index_it: IndexIterator,
 }
 
 impl BlockIterator {
     pub fn new(index: &PathBuf, db: &PathBuf, start: Option<HashBytes>) -> Self {
         let file = File::open(db).unwrap();
+        let file = BufReader::new(file);
         let mut index_it = IndexIterator::new(index);
 
         if let Some(start) = start {
@@ -68,15 +69,32 @@ impl BlockIterator {
 }
 
 impl Iterator for BlockIterator {
-    type Item = Block;
+    type Item = Result<Block>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if let Some(idx) = self.index_it.next() {
             let mut buffer = vec![0u8; idx.size as _];
-            self.file.seek(std::io::SeekFrom::Start(idx.pos)).unwrap();
-            self.file.read_exact(&mut buffer).unwrap();
-            return Some(borsh::from_slice(&buffer).unwrap());
+            if let Err(e) = self.file.seek(std::io::SeekFrom::Start(idx.pos)) {
+                return Some(Err(Error::io(line!(), module_path!(), e)));
+            }
+            if let Err(e) = self.file.read_exact(&mut buffer) {
+                return Some(Err(Error::io(line!(), module_path!(), e)));
+            }
+            match zstd::stream::decode_all(buffer.as_slice()) {
+                Ok(buffer) => match borsh::from_slice(&buffer) {
+                    Ok(block) => {
+                        return Some(Ok(block));
+                    }
+                    Err(e) => {
+                        return Some(Err(Error::io(line!(), module_path!(), e)));
+                    }
+                },
+                Err(e) => {
+                    return Some(Err(Error::io(line!(), module_path!(), e)));
+                }
+            }
         }
+
         None
     }
 }
@@ -128,6 +146,7 @@ impl Blockchain {
                 guard!(file.seek(SeekFrom::Start(last.pos)), io);
                 let mut buffer = vec![0u8; last.size as _];
                 guard!(file.read_exact(&mut buffer), io);
+                let buffer = guard!(zstd::stream::decode_all(buffer.as_slice()), io);
                 let blk: Block = borsh::from_slice(&buffer).unwrap();
 
                 (Some(last.hash), Some(blk.next_choice), last.pos + last.size)
@@ -216,6 +235,7 @@ impl Blockchain {
         self.count += 1;
 
         let data = guard!(borsh::to_vec(&blk), io);
+        let data = guard!(zstd::stream::encode_all(data.as_slice(), 6), io);
         let idx = IndexEntry {
             hash: blk.hash,
             pos: self.block_pos,

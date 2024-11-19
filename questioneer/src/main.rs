@@ -44,8 +44,16 @@ impl App {
         };
         self.port_pool += 1;
 
-        let p = self.rt.block_on(async { Peer::new(cfg).unwrap() });
-        self.peers.insert(p.pubhex(), p);
+        let p = self.rt.block_on(async { Peer::new(cfg) });
+
+        match p {
+            Ok(p) => {
+                self.peers.insert(p.pubhex(), p);
+            }
+            Err(e) => {
+                tracing::error!("{e}");
+            }
+        }
     }
 
     fn delete_peer(&mut self) {
@@ -117,9 +125,16 @@ impl App {
             let mut lines: Vec<Line> = Vec::new();
             let it = self.rt.block_on(peer.block_iter());
             for blk in it {
-                lines.push(hex::encode(&blk.hash).into());
-                for d in blk.data.iter() {
-                    lines.push(format!("+ {}", String::from_utf8_lossy(d)).into());
+                match blk {
+                    Ok(blk) => {
+                        lines.push(hex::encode(&blk.hash).into());
+                        for d in blk.data.iter() {
+                            lines.push(format!("+ {}", String::from_utf8_lossy(d)).into());
+                        }
+                    }
+                    Err(e) => {
+                        tracing::error!("{e}");
+                    }
                 }
             }
             Paragraph::new(lines).block(block).render(layout[1], buf);
