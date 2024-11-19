@@ -13,4 +13,4 @@ edition = "2021"
 
 [workspace]
 resolver = "2"
-members = [ "keys","mcriddle", "mcriddle-daemon", "questioneer"]
+members = ["mcriddle", "mcriddle-daemon", "questioneer"]
