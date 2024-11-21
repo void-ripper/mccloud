@@ -11,7 +11,7 @@ use std::{
 
 use blockchain::{Block, BlockIterator, Blockchain};
 use client::Client;
-use error::{Error, Result};
+pub use error::{Error, Result};
 use indexmap::IndexSet;
 use k256::{
     elliptic_curve::{rand_core::OsRng, sec1::ToEncodedPoint},
@@ -21,7 +21,7 @@ use message::Message;
 use tokio::{
     net::{TcpListener, TcpStream},
     select,
-    sync::{mpsc, Mutex},
+    sync::{broadcast, mpsc, Mutex},
 };
 
 mod blockchain;
@@ -54,6 +54,7 @@ pub struct Peer {
     prikey: SecretKey,
     pubkey: PubKeyBytes,
     pubhex: String,
+    last_block_tx: broadcast::Sender<Block>,
     to_handle_tx: mpsc::Sender<(Message, Arc<Mutex<Client>>)>,
     to_shutdown: Arc<AtomicBool>,
     clients: Mutex<Clients>,
@@ -90,6 +91,7 @@ impl Peer {
                 .map(|r| hex::encode(r))
                 .unwrap_or(String::new())
         );
+        let (last_block_tx, _) = broadcast::channel(10);
         let peer = Arc::new_cyclic(|me| Self {
             // let peer = Arc::new(Self {
             me: me.clone(),
@@ -97,6 +99,7 @@ impl Peer {
             pubkey,
             pubhex,
             cfg,
+            last_block_tx,
             to_handle_tx: mtx,
             to_shutdown,
             clients: Mutex::new(HashMap::new()),
@@ -396,6 +399,10 @@ impl Peer {
         }
 
         Ok(())
+    }
+
+    pub fn last_block_receiver(&self) -> broadcast::Receiver<Block> {
+        self.last_block_tx.subscribe()
     }
 
     pub async fn block_iter(&self) -> BlockIterator {

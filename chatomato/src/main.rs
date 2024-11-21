@@ -1,3 +1,4 @@
+use config::Config;
 use ratatui::{
     buffer::Buffer,
     crossterm::event::{self, KeyCode, KeyEventKind},
@@ -6,9 +7,10 @@ use ratatui::{
     text::Line,
     widgets::{Block, Clear, Paragraph, Widget},
 };
-use tokio::runtime::Runtime;
 
+mod config;
 mod db;
+mod error;
 
 fn center(area: Rect, horizontal: Constraint, vertical: Constraint) -> Rect {
     let [area] = Layout::horizontal([horizontal]).flex(Flex::Center).areas(area);
@@ -149,8 +151,7 @@ impl Widget for &App {
 }
 
 fn main() {
-    let rt = Runtime::new().unwrap();
-
+    let cfg = Config { data: "data".into() };
     let mut app = App {
         focus: Focus::Rooms,
         mode: Mode::Normal,
