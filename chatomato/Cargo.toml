@@ -4,7 +4,8 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+indexmap = "2.6.0"
 mcriddle = { version = "0.1.0", path = "../mcriddle" }
 ratatui = "0.29.0"
-rusqlite = "0.32.1"
+rusqlite = { version = "0.32.1", features = ["bundled"] }
 tokio = { version = "1.41.1", features = ["full"] }
