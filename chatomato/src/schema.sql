@@ -14,6 +14,7 @@ CREATE TABLE user_message (
 
 CREATE TABLE room (
     id INTEGER PRIMARY KEY,
+    creator_id INTEGER NOT NULL REFERENCES user(id),
     name VARCHAR
 );
 

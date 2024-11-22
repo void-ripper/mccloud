@@ -1,4 +1,6 @@
 use config::Config;
+use db::Database;
+use indexmap::{IndexMap, IndexSet};
 use ratatui::{
     buffer::Buffer,
     crossterm::event::{self, KeyCode, KeyEventKind},
@@ -38,10 +40,12 @@ enum Mode {
 }
 
 struct App {
+    database: Database,
     focus: Focus,
     mode: Mode,
     input_buffer: String,
     show_popup: bool,
+    rooms: IndexSet<String>,
 }
 
 impl App {
@@ -151,15 +155,24 @@ impl Widget for &App {
 }
 
 fn main() {
-    let cfg = Config { data: "data".into() };
+    let cfg = Config {
+        addr: "0.0.0.0:29092".into(),
+        data: "data".into(),
+    };
+    let db = Database::new(cfg).unwrap();
     let mut app = App {
+        database: db,
         focus: Focus::Rooms,
         mode: Mode::Normal,
         input_buffer: String::new(),
         show_popup: true,
+        rooms: IndexSet::new(),
     };
     let mut term = ratatui::init();
     let mut err = None;
+
+    let rooms = app.database.list_rooms().unwrap();
+    app.rooms.extend(rooms.iter().map(|r| r.name.clone()));
 
     loop {
         if let Err(e) = term.draw(|frame| frame.render_widget(&app, frame.area())) {

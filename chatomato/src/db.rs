@@ -29,6 +29,11 @@ macro_rules! ex {
     };
 }
 
+pub struct Room {
+    pub id: i64,
+    pub name: String,
+}
+
 pub struct User {
     pub id: i64,
     pub pubkey: [u8; 33],
@@ -41,22 +46,32 @@ pub struct PrivateUser {
 }
 
 #[derive(BorshSerialize, BorshDeserialize)]
+enum Envelope {
+    Calledback { msg: Message, cb: u32 },
+    Oneshot { msg: Message },
+}
+
+#[derive(BorshSerialize, BorshDeserialize)]
 enum Message {
-    CreateUser { pubkey: [u8; 33], name: String, cb: u32 },
-    CreatedUser { cb: u32, id: i64 },
+    CreateUser { pubkey: [u8; 33], name: String },
+    CreateRoom { pubkey: [u8; 33], name: String },
 }
 
 enum Answer {
     CreatedUser { id: i64 },
+    CreatedRoom { id: i64 },
 }
+
+type SafeConn = Arc<Mutex<rusqlite::Connection>>;
+type Callbacks = Arc<Mutex<HashMap<u32, oneshot::Sender<Answer>>>>;
 
 pub struct Database {
     cfg: Config,
     rt: Runtime,
     peer: Arc<Peer>,
-    db: Arc<Mutex<rusqlite::Connection>>,
+    db: SafeConn,
     cb_pool: AtomicU32,
-    callback: Arc<Mutex<HashMap<u32, oneshot::Sender<Answer>>>>,
+    callback: Callbacks,
 }
 
 impl Database {
@@ -64,23 +79,38 @@ impl Database {
         let dbfile = cfg.data.join("data.db");
         let existed = dbfile.exists();
         let db = ex!(rusqlite::Connection::open(&dbfile), sqlite);
-        let db = Arc::new(Mutex::new(db));
 
-        if !existed {}
+        if !existed {
+            ex!(db.execute_batch(include_str!("schema.sql")), sqlite);
+        }
+        let db = Arc::new(Mutex::new(db));
 
         let rt = ex!(Runtime::new(), sync);
         let peer_cfg = mcriddle::Config {
-            addr: "0.0.0.0:29092".into(),
+            addr: cfg.addr.clone().into(),
             folder: cfg.data.clone(),
         };
         let p = ex!(rt.block_on(async { Peer::new(peer_cfg) }), riddle);
 
+        let callback = Arc::new(Mutex::new(HashMap::new()));
         let mut lbr = p.last_block_receiver();
         let db0 = db.clone();
+        let cb0 = callback.clone();
         rt.spawn(async move {
             while let Ok(blk) = lbr.recv().await {
                 for data in blk.data {
-                    let m: Message = borsh::from_slice(&data).unwrap();
+                    let e: Envelope = borsh::from_slice(&data).unwrap();
+                    let res = match e {
+                        Envelope::Calledback { msg, cb } => match msg {
+                            Message::CreateUser { pubkey, name } => {
+                                Database::handle_create_user(&db0, &cb0, pubkey, name, cb).await
+                            }
+                            Message::CreateRoom { pubkey, name } => {
+                                Database::handle_create_room(&db0, &cb0, pubkey, name, cb).await
+                            }
+                        },
+                        Envelope::Oneshot { msg } => Ok(()),
+                    };
                 }
             }
         });
@@ -91,19 +121,56 @@ impl Database {
             db,
             peer: p,
             cb_pool: AtomicU32::new(0),
-            callback: Arc::new(Mutex::new(HashMap::new())),
+            callback,
         })
     }
 
-    async fn send(&self, msg: &Message) -> Result<()> {
-        let data = ex!(borsh::to_vec(msg), io);
+    fn share(&self, msg: Message) -> Result<Answer> {
+        let cb = self.cb_pool.fetch_add(1, Ordering::SeqCst);
+        let data = ex!(borsh::to_vec(&Envelope::Calledback { msg, cb }), io);
 
-        ex!(self.peer.share(data).await, riddle);
+        let (tx, rx) = oneshot::channel();
+        let callbacks = self.callback.clone();
+        let peer = self.peer.clone();
+        ex!(
+            self.rt.block_on(async move {
+                callbacks.lock().await.insert(cb, tx);
+                peer.share(data).await
+            }),
+            riddle
+        );
+
+        let answer = ex!(
+            self.rt.block_on(async move {
+                let recv = rx.await;
+                recv
+            }),
+            sync
+        );
+
+        Ok(answer)
+    }
+
+    async fn handle_create_user(db: &SafeConn, cbs: &Callbacks, pubkey: [u8; 33], name: String, cb: u32) -> Result<()> {
+        let id = {
+            let db = db.lock().await;
+            let mut stmt = ex!(
+                db.prepare_cached("INSERT INTO user(pubkey, name) VALUES(?1, ?2) "),
+                sqlite
+            );
+            let id = ex!(stmt.insert((pubkey, name)), sqlite);
+            id
+        };
+
+        let mut cbs = cbs.lock().await;
+        if let Some(tx) = cbs.remove(&cb) {
+            tx.send(Answer::CreatedUser { id });
+        }
 
         Ok(())
     }
 
-    pub fn create_user(&mut self, name: String) -> User {
+    pub fn create_user(&self, name: String) -> Result<User> {
         let secret = SecretKey::random(&mut OsRng);
         let public = secret.public_key().to_encoded_point(true);
         let public = public.as_bytes();
@@ -114,22 +181,76 @@ impl Database {
             name,
         };
         user.pubkey.copy_from_slice(public);
-        let cb = self.cb_pool.fetch_add(1, Ordering::SeqCst);
-
-        let (tx, rx) = oneshot::channel();
-        self.rt.spawn(async move {
-            self.callback.lock().await.insert(cb, tx);
-        });
-
-        let answer = self.rt.block_on(async move {
-            let recv = rx.await;
-            recv.unwrap()
-        });
+        let answer = ex!(
+            self.share(Message::CreateUser {
+                pubkey: user.pubkey,
+                name: user.name.clone(),
+            }),
+            source
+        );
 
         if let Answer::CreatedUser { id } = answer {
             user.id = id;
         }
 
-        user
+        Ok(user)
+    }
+
+    async fn handle_create_room(db: &SafeConn, cbs: &Callbacks, pubkey: [u8; 33], name: String, cb: u32) -> Result<()> {
+        let id = {
+            let db = db.lock().await;
+            let mut stmt = ex!(
+                db.prepare_cached(
+                    "INSERT INTO room(creator_id, name) VALUES((SELECT id FROM user WHERE pubkey = ?1), ?2) "
+                ),
+                sqlite
+            );
+            let id = ex!(stmt.insert((pubkey, name)), sqlite);
+            id
+        };
+
+        let mut cbs = cbs.lock().await;
+        if let Some(tx) = cbs.remove(&cb) {
+            tx.send(Answer::CreatedRoom { id });
+        }
+
+        Ok(())
+    }
+
+    pub fn create_room(&self, name: String, pubkey: [u8; 33]) -> Result<Room> {
+        let mut room = Room {
+            id: 0,
+            name: name.clone(),
+        };
+        let answer = ex!(self.share(Message::CreateRoom { pubkey, name }), source);
+
+        if let Answer::CreatedRoom { id } = answer {
+            room.id = id;
+        }
+
+        Ok(room)
+    }
+
+    pub fn list_rooms(&self) -> Result<Vec<Room>> {
+        let db = self.db.clone();
+        let rooms = self.rt.block_on(async move {
+            let db = db.lock().await;
+            let mut stmt = ex!(db.prepare_cached("SELECT id, name FROM room"), sqlite);
+            let res = stmt
+                .query_map([], |r| {
+                    Ok(Room {
+                        id: r.get(0)?,
+                        name: r.get(1)?,
+                    })
+                })
+                .unwrap();
+            let mut rooms = Vec::new();
+            for r in res {
+                rooms.push(r.unwrap());
+            }
+
+            Ok(rooms)
+        });
+        rooms
     }
 }
