@@ -66,7 +66,7 @@ type SafeConn = Arc<Mutex<rusqlite::Connection>>;
 type Callbacks = Arc<Mutex<HashMap<u32, oneshot::Sender<Answer>>>>;
 
 pub struct Database {
-    cfg: Config,
+    pub cfg: Config,
     rt: Runtime,
     peer: Arc<Peer>,
     db: SafeConn,
@@ -164,7 +164,7 @@ impl Database {
 
         let mut cbs = cbs.lock().await;
         if let Some(tx) = cbs.remove(&cb) {
-            tx.send(Answer::CreatedUser { id });
+            let _ = tx.send(Answer::CreatedUser { id });
         }
 
         Ok(())
@@ -211,7 +211,7 @@ impl Database {
 
         let mut cbs = cbs.lock().await;
         if let Some(tx) = cbs.remove(&cb) {
-            tx.send(Answer::CreatedRoom { id });
+            let _ = tx.send(Answer::CreatedRoom { id });
         }
 
         Ok(())

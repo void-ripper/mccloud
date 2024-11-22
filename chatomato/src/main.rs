@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use config::Config;
 use db::Database;
 use indexmap::{IndexMap, IndexSet};
@@ -10,6 +12,7 @@ use ratatui::{
     widgets::{Block, Clear, Paragraph, Widget},
 };
 
+mod components;
 mod config;
 mod db;
 mod error;
@@ -40,11 +43,12 @@ enum Mode {
 }
 
 struct App {
-    database: Database,
+    db: Database,
     focus: Focus,
     mode: Mode,
     input_buffer: String,
     show_popup: bool,
+    show_create_user: bool,
     rooms: IndexSet<String>,
 }
 
@@ -73,7 +77,11 @@ impl App {
                     self.mode = Mode::Normal;
                 }
                 KeyCode::Enter => {
+                    self.mode = Mode::Normal;
                     self.input_buffer.clear();
+                    if self.show_create_user {
+                        self.show_create_user = false;
+                    }
                 }
                 KeyCode::Char(a) => {
                     self.input_buffer.push(a);
@@ -134,6 +142,18 @@ impl App {
             .block(blk)
             .render(layout[1], buf);
     }
+
+    fn show_create_user(&self, area: Rect, buf: &mut Buffer) {
+        let center = center(area, Constraint::Percentage(50), Constraint::Percentage(50));
+
+        Clear.render(center, buf);
+        let layout = Layout::vertical([Constraint::Length(3)]).split(center);
+
+        let blk = Block::new().title("name");
+        Paragraph::new(self.input_buffer.as_str())
+            .block(blk)
+            .render(layout[0], buf);
+    }
 }
 
 impl Widget for &App {
@@ -148,6 +168,10 @@ impl Widget for &App {
         self.show_messages(left[1], buf);
         self.show_chat(layout[1], buf);
 
+        if self.show_create_user {
+            self.show_create_user(area, buf);
+        }
+
         if self.show_popup {
             self.show_pop(layout[1], buf);
         }
@@ -159,19 +183,22 @@ fn main() {
         addr: "0.0.0.0:29092".into(),
         data: "data".into(),
     };
+    let prikey = cfg.data.join("private.key");
+    let exists = prikey.exists();
     let db = Database::new(cfg).unwrap();
     let mut app = App {
-        database: db,
+        db,
         focus: Focus::Rooms,
-        mode: Mode::Normal,
+        mode: if exists { Mode::Normal } else { Mode::Input },
         input_buffer: String::new(),
-        show_popup: true,
+        show_popup: exists,
+        show_create_user: !exists,
         rooms: IndexSet::new(),
     };
     let mut term = ratatui::init();
     let mut err = None;
 
-    let rooms = app.database.list_rooms().unwrap();
+    let rooms = app.db.list_rooms().unwrap();
     app.rooms.extend(rooms.iter().map(|r| r.name.clone()));
 
     loop {
