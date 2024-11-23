@@ -203,7 +203,7 @@ impl Peer {
         if let Message::Greeting {
             pubkey,
             root,
-            last,
+            last: _,
             count,
             known,
         } = greeting

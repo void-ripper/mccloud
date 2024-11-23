@@ -8,7 +8,7 @@ use ratatui::{
 
 use crate::bottom_right;
 
-use super::Component;
+use super::{Component, State};
 
 pub struct Popup {
     show: bool,
@@ -21,7 +21,7 @@ impl Popup {
 }
 
 impl Component for Popup {
-    fn on_press(&mut self, ev: KeyCode) {
+    fn on_press(&mut self, _state: &mut State, ev: KeyCode) {
         match ev {
             KeyCode::Char(' ') => {
                 self.show = !self.show;

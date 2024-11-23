@@ -7,7 +7,7 @@ use ratatui::{
 
 use crate::center;
 
-use super::Component;
+use super::{Component, State};
 
 pub struct CreateUser {
     inbuffer: String,
@@ -24,7 +24,7 @@ impl CreateUser {
 }
 
 impl Component for CreateUser {
-    fn on_press(&mut self, ev: KeyCode) {
+    fn on_press(&mut self, _state: &mut State, ev: KeyCode) {
         match ev {
             KeyCode::Enter => {
                 self.inbuffer.clear();
@@ -49,7 +49,7 @@ impl Widget for &CreateUser {
 
             let layout = Layout::vertical([Constraint::Length(3)]).split(inner);
 
-            let blk = Block::new().title("name");
+            let blk = Block::bordered().title(" name ");
             Paragraph::new(self.inbuffer.as_str()).block(blk).render(layout[0], buf);
         }
     }
