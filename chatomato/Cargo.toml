@@ -5,6 +5,7 @@ edition.workspace = true
 
 [dependencies]
 borsh = { version = "1.5.3", features = ["derive"] }
+hex = "0.4.3"
 indexmap = "2.6.0"
 k256 = { version = "0.13.4", features = ["ecdh"] }
 mcriddle = { version = "0.1.0", path = "../mcriddle" }

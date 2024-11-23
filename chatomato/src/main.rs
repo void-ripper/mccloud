@@ -39,18 +39,37 @@ impl State {
     }
 }
 
+enum Active {
+    Main(MainView),
+    CreateUser(CreateUser),
+}
+
+impl Active {
+    fn on_press(&mut self, state: &mut State, ev: KeyCode) {
+        match self {
+            Self::Main(main) => main.on_press(state, ev),
+            Self::CreateUser(cu) => cu.on_press(state, ev),
+        }
+    }
+
+    fn render(&self, area: Rect, buf: &mut Buffer) {
+        match self {
+            Self::Main(main) => main.render(area, buf),
+            Self::CreateUser(cu) => cu.render(area, buf),
+        }
+    }
+}
+
 struct App {
     state: State,
-    main: MainView,
+    active: Active,
     popup: Popup,
-    create_user: CreateUser,
 }
 
 impl App {
     fn on_press(&mut self, ev: KeyCode) {
-        self.main.on_press(&mut self.state, ev);
+        self.active.on_press(&mut self.state, ev);
         self.popup.on_press(&mut self.state, ev);
-        self.create_user.on_press(&mut self.state, ev);
     }
 }
 
@@ -59,9 +78,7 @@ impl Widget for &App {
     where
         Self: Sized,
     {
-        self.main.render(area, buf);
-
-        self.create_user.render(area, buf);
+        self.active.render(area, buf);
         self.popup.render(area, buf);
     }
 }
@@ -71,6 +88,11 @@ fn main() {
         addr: "0.0.0.0:29092".into(),
         data: "data".into(),
     };
+
+    if !cfg.data.exists() {
+        std::fs::create_dir_all(&cfg.data).unwrap();
+    }
+
     let prikey = cfg.data.join("private.key");
     let exists = prikey.exists();
     let db = Database::new(cfg).unwrap();
@@ -80,9 +102,12 @@ fn main() {
             db,
             quit: false,
         },
-        main: MainView::new(),
+        active: if exists {
+            Active::Main(MainView::new())
+        } else {
+            Active::CreateUser(CreateUser::new())
+        },
         popup: Popup::new(exists),
-        create_user: CreateUser::new(!exists),
     };
     let mut term = ratatui::init();
     let mut err = None;
@@ -99,6 +124,7 @@ fn main() {
             Ok(event::Event::Key(ev)) => {
                 if ev.kind == KeyEventKind::Press {
                     app.on_press(ev.code);
+
                     if app.state.quit {
                         break;
                     }

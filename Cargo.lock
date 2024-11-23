@@ -248,6 +248,7 @@ name = "chatomato"
 version = "0.1.0"
 dependencies = [
  "borsh",
+ "hex",
  "indexmap",
  "k256",
  "mcriddle",
