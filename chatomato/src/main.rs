@@ -95,7 +95,7 @@ fn main() {
 
     let prikey = cfg.data.join("private.key");
     let exists = prikey.exists();
-    let db = Database::new(cfg).unwrap();
+    let db = Database::new(cfg.clone()).unwrap();
     let mut app = App {
         state: State {
             rooms: IndexSet::new(),
@@ -105,7 +105,7 @@ fn main() {
         active: if exists {
             Active::Main(MainView::new())
         } else {
-            Active::CreateUser(CreateUser::new())
+            Active::CreateUser(CreateUser::new(cfg.clone(), |name| {}))
         },
         popup: Popup::new(exists),
     };

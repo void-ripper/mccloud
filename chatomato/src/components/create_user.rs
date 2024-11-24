@@ -10,36 +10,38 @@ use ratatui::{
     widgets::{Block, Clear, Paragraph, Widget},
 };
 
-use crate::center;
+use crate::{center, config::Config};
 
 use super::{Component, State};
 
-pub struct CreateUser {
+trait OnEnter: FnMut(String) {}
+
+pub struct CreateUser<F: OnEnter> {
+    cfg: Config,
     inbuffer: String,
-    secret: SecretKey,
-    public: Box<[u8]>,
+    on_enter: F,
 }
 
-impl CreateUser {
-    pub fn new() -> Self {
-        let secret = k256::SecretKey::random(&mut OsRng);
-        let public = secret.public_key().to_encoded_point(true).to_bytes();
-
+impl<F: OnEnter> CreateUser<F> {
+    pub fn new(cfg: Config, on_enter: F) -> Self {
         Self {
+            cfg,
             inbuffer: String::new(),
-            secret,
-            public,
+            on_enter,
         }
     }
 }
 
-impl Component for CreateUser {
+impl<F: OnEnter> Component for CreateUser<F> {
     fn on_press(&mut self, state: &mut State, ev: KeyCode) {
         match ev {
             KeyCode::Esc => {
                 state.quit = true;
             }
             KeyCode::Enter => {
+                if self.inbuffer.len() > 3 {
+                    (self.on_enter)(self.inbuffer.clone());
+                }
                 self.inbuffer.clear();
             }
             KeyCode::Char(a) => {
@@ -50,7 +52,7 @@ impl Component for CreateUser {
     }
 }
 
-impl Widget for &CreateUser {
+impl<F: OnEnter> Widget for &CreateUser<F> {
     fn render(self, area: Rect, buf: &mut Buffer)
     where
         Self: Sized,
@@ -67,12 +69,9 @@ impl Widget for &CreateUser {
         let lines: Vec<Line> = vec![" Please enter you display name".into()];
         Paragraph::new(lines).render(layout[0], buf);
 
-        let blk = Block::bordered().title(" public key ");
-        Paragraph::new(hex::encode(&self.public))
-            .block(blk)
-            .render(layout[1], buf);
-
         let blk = Block::bordered().title(" name ");
-        Paragraph::new(self.inbuffer.as_str()).block(blk).render(layout[2], buf);
+        Paragraph::new(self.inbuffer.as_str()).block(blk).render(layout[1], buf);
+
+        Paragraph::new("Hint: Name has to belonger then 3 chars.").render(layout[2], buf);
     }
 }
