@@ -89,7 +89,17 @@ impl Database {
             addr: cfg.addr.clone().into(),
             folder: cfg.data.clone(),
         };
-        let p = ex!(rt.block_on(async { Peer::new(peer_cfg) }), riddle);
+        let p = ex!(
+            rt.block_on(async {
+                let p = ex!(Peer::new(peer_cfg), riddle);
+                for conn in cfg.clients.iter() {
+                    ex!(p.connect(conn.parse().unwrap()).await, riddle);
+                }
+
+                Ok(p)
+            }),
+            source
+        );
 
         let callback = Arc::new(Mutex::new(HashMap::new()));
         let mut lbr = p.last_block_receiver();
@@ -169,7 +179,7 @@ impl Database {
         Ok(())
     }
 
-    pub fn create_user(&self, name: String) -> Result<User> {
+    pub fn create_user(&self, name: String) -> Result<PrivateUser> {
         let secret = SecretKey::random(&mut OsRng);
         let public = secret.public_key().to_encoded_point(true);
         let public = public.as_bytes();
@@ -192,7 +202,7 @@ impl Database {
             user.id = id;
         }
 
-        Ok(user)
+        Ok(PrivateUser { user, secret })
     }
 
     async fn handle_create_room(db: &SafeConn, cbs: &Callbacks, pubkey: [u8; 33], name: String, cb: u32) -> Result<()> {
@@ -243,6 +253,7 @@ impl Database {
                     })
                 })
                 .unwrap();
+
             let mut rooms = Vec::new();
             for r in res {
                 rooms.push(r.unwrap());
@@ -251,5 +262,26 @@ impl Database {
             Ok(rooms)
         });
         rooms
+    }
+
+    pub fn user_by_key(&self, pubkey: [u8; 33]) -> Result<User> {
+        let db = self.db.clone();
+        let user = self.rt.block_on(async move {
+            let db = db.lock().await;
+            let mut stmt = ex!(db.prepare_cached("SELECT id, name FROM user WHERE pubkey = ?"), sqlite);
+            let user = ex!(
+                stmt.query_row([pubkey], |r| {
+                    Ok(User {
+                        id: r.get(0)?,
+                        pubkey: pubkey,
+                        name: r.get(1)?,
+                    })
+                }),
+                sqlite
+            );
+            Ok(user)
+        });
+
+        user
     }
 }

@@ -1,7 +1,3 @@
-use k256::{
-    elliptic_curve::{rand_core::OsRng, sec1::ToEncodedPoint},
-    SecretKey,
-};
 use ratatui::{
     buffer::Buffer,
     crossterm::event::KeyCode,
@@ -14,16 +10,14 @@ use crate::{center, config::Config};
 
 use super::{Component, State};
 
-trait OnEnter: FnMut(String) {}
-
-pub struct CreateUser<F: OnEnter> {
+pub struct CreateUser {
     cfg: Config,
     inbuffer: String,
-    on_enter: F,
+    on_enter: Box<dyn FnMut(&mut State, String)>,
 }
 
-impl<F: OnEnter> CreateUser<F> {
-    pub fn new(cfg: Config, on_enter: F) -> Self {
+impl CreateUser {
+    pub fn new(cfg: Config, on_enter: Box<dyn FnMut(&mut State, String)>) -> Self {
         Self {
             cfg,
             inbuffer: String::new(),
@@ -32,7 +26,7 @@ impl<F: OnEnter> CreateUser<F> {
     }
 }
 
-impl<F: OnEnter> Component for CreateUser<F> {
+impl Component for CreateUser {
     fn on_press(&mut self, state: &mut State, ev: KeyCode) {
         match ev {
             KeyCode::Esc => {
@@ -40,7 +34,7 @@ impl<F: OnEnter> Component for CreateUser<F> {
             }
             KeyCode::Enter => {
                 if self.inbuffer.len() > 3 {
-                    (self.on_enter)(self.inbuffer.clone());
+                    (self.on_enter)(state, self.inbuffer.clone());
                 }
                 self.inbuffer.clear();
             }
@@ -52,7 +46,7 @@ impl<F: OnEnter> Component for CreateUser<F> {
     }
 }
 
-impl<F: OnEnter> Widget for &CreateUser<F> {
+impl Widget for &CreateUser {
     fn render(self, area: Rect, buf: &mut Buffer)
     where
         Self: Sized,

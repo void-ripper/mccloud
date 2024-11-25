@@ -3,12 +3,16 @@ use std::path::PathBuf;
 use clap::Parser;
 
 #[derive(Parser)]
-#[command(version)]
+#[command(author, version, about)]
 struct Args {
+    #[arg(long, default_value = "127.0.0.1")]
+    host: String,
     #[arg(long, default_value_t = 29092)]
     port: u16,
-    #[arg(long, default_value_t = 29091)]
-    wsport: u16,
+    #[arg(long)]
+    wsport: Option<u16>,
+    #[arg(long, default_value = "data")]
+    data: PathBuf,
     #[arg(long)]
     conn: Vec<String>,
     #[arg(long, default_value = "debug")]
@@ -21,8 +25,25 @@ async fn main() {
     tracing_subscriber::fmt().with_env_filter(&args.log).init();
 
     let cfg = mcriddle::Config {
-        addr: "127.0.0.1:39093".into(),
-        folder: PathBuf::from("data0"),
+        addr: format!("{}:{}", args.host, args.port),
+        folder: args.data,
     };
     let peer = mcriddle::Peer::new(cfg).unwrap();
+
+    for conn in args.conn.iter() {
+        match conn.parse() {
+            Ok(conn) => {
+                if let Err(e) = peer.connect(conn).await {
+                    tracing::error!("{e}");
+                }
+            }
+            Err(e) => {
+                tracing::error!("{} {}", conn, e);
+            }
+        }
+    }
+
+    if let Err(e) = tokio::signal::ctrl_c().await {
+        tracing::error!("{e}");
+    }
 }
