@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use ratatui::{
     buffer::Buffer,
     crossterm::event::KeyCode,
@@ -6,22 +8,22 @@ use ratatui::{
     widgets::{Block, Clear, Paragraph, Widget},
 };
 
-use crate::{center, config::Config};
+use crate::{center, config::Config, db::Database, Active};
 
-use super::{Component, State};
+use super::{main::MainView, Component, State};
 
 pub struct CreateUser {
     cfg: Config,
     inbuffer: String,
-    on_enter: Box<dyn FnMut(&mut State, String)>,
+    db: Arc<Database>,
 }
 
 impl CreateUser {
-    pub fn new(cfg: Config, on_enter: Box<dyn FnMut(&mut State, String)>) -> Self {
+    pub fn new(cfg: Config, db: Arc<Database>) -> Self {
         Self {
             cfg,
             inbuffer: String::new(),
-            on_enter,
+            db,
         }
     }
 }
@@ -34,7 +36,15 @@ impl Component for CreateUser {
             }
             KeyCode::Enter => {
                 if self.inbuffer.len() > 3 {
-                    (self.on_enter)(state, self.inbuffer.clone());
+                    match self.db.create_user(self.inbuffer.clone()) {
+                        Ok(user) => {
+                            state.user = Some(user);
+                            state.next = Some(Active::Main(MainView::new(self.db.clone())));
+                        }
+                        Err(e) => {
+                            tracing::error!("{e}");
+                        }
+                    }
                 }
                 self.inbuffer.clear();
             }

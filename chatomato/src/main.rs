@@ -29,11 +29,11 @@ pub fn bottom_right(area: Rect, horizontal: Constraint, vertical: Constraint) ->
 }
 
 pub struct State {
-    db: Arc<Database>,
-    rooms: IndexSet<String>,
-    quit: bool,
-    user: Option<PrivateUser>,
-    next: Option<Active>,
+    pub db: Arc<Database>,
+    pub rooms: IndexSet<String>,
+    pub quit: bool,
+    pub user: Option<PrivateUser>,
+    pub next: Option<Active>,
 }
 
 impl State {
@@ -43,7 +43,7 @@ impl State {
     }
 }
 
-enum Active {
+pub enum Active {
     Main(MainView),
     CreateUser(CreateUser),
 }
@@ -119,18 +119,9 @@ fn main() {
             next: None,
         },
         active: if exists {
-            Active::Main(MainView::new())
+            Active::Main(MainView::new(db.clone()))
         } else {
-            Active::CreateUser(CreateUser::new(
-                cfg.clone(),
-                Box::new(move |state, name| match db.create_user(name) {
-                    Ok(user) => {
-                        state.user = Some(user);
-                        state.next = Some(Active::Main(MainView::new()));
-                    }
-                    Err(_e) => {}
-                }),
-            ))
+            Active::CreateUser(CreateUser::new(cfg.clone(), db.clone()))
         },
         popup: Popup::new(exists),
     };
@@ -170,6 +161,6 @@ fn main() {
     ratatui::restore();
 
     if let Some(e) = err {
-        println!("{e}");
+        tracing::error!("{e}");
     }
 }

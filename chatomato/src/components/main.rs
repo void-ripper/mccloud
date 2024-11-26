@@ -1,10 +1,14 @@
+use std::sync::Arc;
+
 use ratatui::{
     buffer::Buffer,
     crossterm::event::KeyCode,
     layout::{Constraint, Layout, Rect},
     style::Stylize,
-    widgets::{Block, Paragraph, Widget},
+    widgets::{Block, Clear, Paragraph, Widget},
 };
+
+use crate::{center, db::Database};
 
 use super::{Component, State};
 
@@ -16,15 +20,19 @@ enum Focus {
 }
 
 pub struct MainView {
+    db: Arc<Database>,
     focus: Focus,
     input_buffer: String,
+    show_create_room: bool,
 }
 
 impl MainView {
-    pub fn new() -> Self {
+    pub fn new(db: Arc<Database>) -> Self {
         Self {
+            db,
             focus: Focus::Rooms,
             input_buffer: String::new(),
+            show_create_room: false,
         }
     }
 
@@ -35,6 +43,7 @@ impl MainView {
             blk
         }
     }
+
     fn show_rooms(&self, area: Rect, buf: &mut Buffer) {
         let blk = self.is_focused(Block::bordered().title(" Rooms "), Focus::Rooms);
 
@@ -57,24 +66,58 @@ impl MainView {
             .block(blk)
             .render(layout[1], buf);
     }
+
+    fn show_create_room_popup(&self, area: Rect, buf: &mut Buffer) {
+        let area = center(area, Constraint::Percentage(50), Constraint::Percentage(50));
+
+        Clear.render(area, buf);
+        let blk = Block::bordered().title(" New Room ");
+        Paragraph::new(self.input_buffer.as_str()).block(blk).render(area, buf);
+    }
 }
 
 impl Component for MainView {
     fn on_press(&mut self, state: &mut State, ev: KeyCode) {
-        match ev {
-            KeyCode::Esc | KeyCode::Char('q') => {
-                state.quit = true;
-            },
-            KeyCode::Char('1') => {
-                self.focus = Focus::Rooms;
+        if self.show_create_room {
+            match ev {
+                KeyCode::Esc => {
+                    self.show_create_room = false;
+                    self.input_buffer.clear();
+                }
+                KeyCode::Enter => {
+                    self.show_create_room = false;
+
+                    if let Some(user) = &state.user {
+                        self.db.create_room(self.input_buffer.clone(), user.user.pubkey);
+                        state.update_rooms();
+                    }
+
+                    self.input_buffer.clear();
+                }
+                KeyCode::Char(a) => {
+                    self.input_buffer.push(a);
+                }
+                _ => {}
             }
-            KeyCode::Char('2') => {
-                self.focus = Focus::Messages;
+        } else {
+            match ev {
+                KeyCode::Esc | KeyCode::Char('q') => {
+                    state.quit = true;
+                }
+                KeyCode::Char('1') => {
+                    self.focus = Focus::Rooms;
+                }
+                KeyCode::Char('2') => {
+                    self.focus = Focus::Messages;
+                }
+                KeyCode::Char('3') => {
+                    self.focus = Focus::Chat;
+                }
+                KeyCode::Char('c') => {
+                    self.show_create_room = true;
+                }
+                _ => {}
             }
-            KeyCode::Char('3') => {
-                self.focus = Focus::Chat;
-            }
-            _ => {}
         }
     }
 }
@@ -90,5 +133,9 @@ impl Widget for &MainView {
         self.show_rooms(left[0], buf);
         self.show_messages(left[1], buf);
         self.show_chat(layout[1], buf);
+
+        if self.show_create_room {
+            self.show_create_room_popup(area, buf);
+        }
     }
 }
