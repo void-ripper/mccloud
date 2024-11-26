@@ -279,6 +279,10 @@ impl Peer {
                     }
                 }
             }
+
+            if let Err(e) = to_handle.send((Message::Remove { pubkey }, cl.clone())).await {
+                tracing::error!("{} {}", pubhex, e);
+            }
         });
 
         Ok(())
@@ -311,8 +315,14 @@ impl Peer {
             }
             Message::Remove { pubkey } => {
                 tracing::info!("{} remove {}", self.pubhex, hex::encode(&pubkey));
-                let msg = Message::Remove { pubkey };
-                guard!(self.broadcast_except(msg, &cl).await, source);
+                let was_known = self.known.lock().await.swap_remove(&pubkey);
+
+                self.clients.lock().await.remove(&pubkey);
+
+                if was_known {
+                    let msg = Message::Remove { pubkey };
+                    guard!(self.broadcast(msg).await, source);
+                }
             }
             Message::ShareData { data } => {
                 tracing::info!("{} got data", self.pubhex);
@@ -333,6 +343,7 @@ impl Peer {
             }
             Message::RequestedBlock { block } => {
                 tracing::info!("{} got block {}", self.pubhex, hex::encode(&block.hash));
+
                 guard!(self.blockchain.lock().await.add_block(block.clone()), source);
                 guard!(self.last_block_tx.send(block), sync);
             }
