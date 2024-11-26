@@ -14,7 +14,7 @@ use k256::{
 
 use crate::{
     error::{Error, Result},
-    guard, HashBytes, PubKeyBytes, SignBytes,
+    ex, HashBytes, PubKeyBytes, SignBytes,
 };
 
 #[derive(BorshDeserialize, BorshSerialize, Clone)]
@@ -123,7 +123,7 @@ pub struct Blockchain {
 impl Blockchain {
     pub fn new(folder: &PathBuf) -> Result<Self> {
         if !folder.exists() {
-            guard!(std::fs::create_dir_all(&folder), io);
+            ex!(std::fs::create_dir_all(&folder), io);
         }
 
         let index_file = folder.join("index.db");
@@ -142,11 +142,11 @@ impl Blockchain {
             }
 
             let (last, next, block_pos) = if let Some(last) = last {
-                let mut file = guard!(File::open(&db_file), io);
-                guard!(file.seek(SeekFrom::Start(last.pos)), io);
+                let mut file = ex!(File::open(&db_file), io);
+                ex!(file.seek(SeekFrom::Start(last.pos)), io);
                 let mut buffer = vec![0u8; last.size as _];
-                guard!(file.read_exact(&mut buffer), io);
-                let buffer = guard!(zstd::stream::decode_all(buffer.as_slice()), io);
+                ex!(file.read_exact(&mut buffer), io);
+                let buffer = ex!(zstd::stream::decode_all(buffer.as_slice()), io);
                 let blk: Block = borsh::from_slice(&buffer).unwrap();
 
                 (Some(last.hash), Some(blk.next_choice), last.pos + last.size)
@@ -155,8 +155,8 @@ impl Blockchain {
             };
             (root, last, block_pos, cnt, next)
         } else {
-            guard!(OpenOptions::new().create(true).write(true).open(&index_file), io);
-            guard!(OpenOptions::new().create(true).write(true).open(&db_file), io);
+            ex!(OpenOptions::new().create(true).write(true).open(&index_file), io);
+            ex!(OpenOptions::new().create(true).write(true).open(&db_file), io);
             (None, None, 0, 0, None)
         };
 
@@ -234,8 +234,8 @@ impl Blockchain {
         self.last = Some(blk.hash);
         self.count += 1;
 
-        let data = guard!(borsh::to_vec(&blk), io);
-        let data = guard!(zstd::stream::encode_all(data.as_slice(), 6), io);
+        let data = ex!(borsh::to_vec(&blk), io);
+        let data = ex!(zstd::stream::encode_all(data.as_slice(), 6), io);
         let idx = IndexEntry {
             hash: blk.hash,
             pos: self.block_pos,
@@ -244,13 +244,13 @@ impl Blockchain {
         self.block_pos += idx.size;
 
         {
-            let idx_file = guard!(OpenOptions::new().append(true).open(&self.index_file), io);
-            guard!(borsh::to_writer(idx_file, &idx), io);
+            let idx_file = ex!(OpenOptions::new().append(true).open(&self.index_file), io);
+            ex!(borsh::to_writer(idx_file, &idx), io);
         }
 
         {
-            let mut db_file = guard!(OpenOptions::new().append(true).open(&self.db_file), io);
-            guard!(db_file.write_all(&data), io);
+            let mut db_file = ex!(OpenOptions::new().append(true).open(&self.db_file), io);
+            ex!(db_file.write_all(&data), io);
         }
 
         Ok(())

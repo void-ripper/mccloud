@@ -14,7 +14,7 @@ use tokio::{
 
 use crate::{
     error::{Error, Result},
-    guard,
+    ex,
     message::Message,
     HashBytes, PubKeyBytes,
 };
@@ -42,22 +42,22 @@ impl Client {
     }
 
     pub async fn write(&mut self, msg: &Message) -> Result<()> {
-        let data = guard!(borsh::to_vec(msg), io);
+        let data = ex!(borsh::to_vec(msg), io);
 
         if let Some(shared) = &self.shared {
             let mut iv = [0u8; 16];
             OsRng.fill_bytes(&mut iv);
-            let enc = guard!(AesCbcEnc::new_from_slices(shared, &iv), encrypt);
+            let enc = ex!(AesCbcEnc::new_from_slices(shared, &iv), encrypt);
             let encrypted = enc.encrypt_padded_vec_mut::<Pkcs7>(&data);
 
             let size = (encrypted.len() as u32).to_le_bytes();
-            guard!(self.sck.write(&size).await, io);
-            guard!(self.sck.write(&iv).await, io);
-            guard!(self.sck.write_all(&encrypted).await, io);
+            ex!(self.sck.write(&size).await, io);
+            ex!(self.sck.write(&iv).await, io);
+            ex!(self.sck.write_all(&encrypted).await, io);
         } else {
             let size = (data.len() as u32).to_ne_bytes();
-            guard!(self.sck.write(&size).await, io);
-            guard!(self.sck.write_all(&data).await, io);
+            ex!(self.sck.write(&size).await, io);
+            ex!(self.sck.write_all(&data).await, io);
         }
 
         Ok(())
@@ -65,27 +65,27 @@ impl Client {
 
     pub async fn read(sck: &mut OwnedReadHalf, shared: &Option<HashBytes>) -> Result<Message> {
         let mut size_bytes = [0u8; 4];
-        guard!(sck.read_exact(&mut size_bytes).await, io);
+        ex!(sck.read_exact(&mut size_bytes).await, io);
         let size = u32::from_le_bytes(size_bytes);
 
         let data = if let Some(shared) = &shared {
             let mut iv = [0u8; 16];
-            guard!(sck.read_exact(&mut iv).await, io);
+            ex!(sck.read_exact(&mut iv).await, io);
 
             let mut data = vec![0u8; size as usize];
-            guard!(sck.read_exact(&mut data).await, io);
+            ex!(sck.read_exact(&mut data).await, io);
 
-            let dec = guard!(AesCbcDec::new_from_slices(shared, &iv), encrypt);
-            let data: Vec<u8> = guard!(dec.decrypt_padded_vec_mut::<Pkcs7>(&data), padding);
+            let dec = ex!(AesCbcDec::new_from_slices(shared, &iv), encrypt);
+            let data: Vec<u8> = ex!(dec.decrypt_padded_vec_mut::<Pkcs7>(&data), padding);
 
             data
         } else {
             let mut data = vec![0u8; size as usize];
-            guard!(sck.read_exact(&mut data).await, io);
+            ex!(sck.read_exact(&mut data).await, io);
 
             data
         };
 
-        Ok(guard!(borsh::from_slice(&data), io))
+        Ok(ex!(borsh::from_slice(&data), io))
     }
 }
