@@ -111,7 +111,7 @@ impl Component for MainView {
                     self.room_name.clear();
                 }
                 KeyCode::Char(a) => {
-                    self.input_buffer.push(a);
+                    self.room_name.push(a);
                 }
                 _ => {}
             }
