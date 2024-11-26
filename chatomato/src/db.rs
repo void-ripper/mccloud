@@ -108,6 +108,9 @@ impl Database {
         rt.spawn(async move {
             while let Ok(blk) = lbr.recv().await {
                 for data in blk.data {
+                    if data.as_slice() == b"[genesis]" {
+                        continue;
+                    }
                     let e: Envelope = borsh::from_slice(&data).unwrap();
                     let res = match e {
                         Envelope::Calledback { msg, cb } => match msg {
@@ -120,6 +123,10 @@ impl Database {
                         },
                         Envelope::Oneshot { msg } => Ok(()),
                     };
+
+                    if let Err(e) = res {
+                        tracing::error!("{e}");
+                    }
                 }
             }
         });
@@ -161,6 +168,8 @@ impl Database {
     }
 
     async fn handle_create_user(db: &SafeConn, cbs: &Callbacks, pubkey: [u8; 33], name: String, cb: u32) -> Result<()> {
+        tracing::debug!("handle create user {} {}", name, cb);
+
         let id = {
             let db = db.lock().await;
             let mut stmt = ex!(
@@ -184,6 +193,7 @@ impl Database {
         let public = secret.public_key().to_encoded_point(true);
         let public = public.as_bytes();
 
+        tracing::info!("create user {}", name);
         let mut user = User {
             id: 0,
             pubkey: [0u8; 33],
@@ -199,8 +209,11 @@ impl Database {
         );
 
         if let Answer::CreatedUser { id } = answer {
+            tracing::info!("use id {}", id);
             user.id = id;
         }
+
+        ex!(std::fs::write(self.cfg.data.join("private.key"), secret.to_bytes()), io);
 
         Ok(PrivateUser { user, secret })
     }

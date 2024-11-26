@@ -275,6 +275,7 @@ impl Peer {
                     }
                     Err(e) => {
                         tracing::error!("{} {}", pubhex, e);
+                        break;
                     }
                 }
             }
@@ -284,6 +285,8 @@ impl Peer {
     }
 
     async fn create_next_block(&self, blkch: &mut Blockchain) -> Result<Block> {
+        tracing::info!("{} create next block", self.pubhex);
+
         let next_author = {
             let k = self.known.lock().await;
             k[rand::random::<usize>() % k.len()]
@@ -301,7 +304,7 @@ impl Peer {
             }
             Message::Announce { pubkey } => {
                 if pubkey != self.pubkey && self.known.lock().await.insert(pubkey.clone()) {
-                    tracing::info!("{} accept {}", self.pubhex, hex::encode(&pubkey));
+                    tracing::info!("{} announce {}", self.pubhex, hex::encode(&pubkey));
                     let msg = Message::Announce { pubkey };
                     guard!(self.broadcast_except(msg, &cl).await, source);
                 }
@@ -330,7 +333,8 @@ impl Peer {
             }
             Message::RequestedBlock { block } => {
                 tracing::info!("{} got block {}", self.pubhex, hex::encode(&block.hash));
-                guard!(self.blockchain.lock().await.add_block(block), source);
+                guard!(self.blockchain.lock().await.add_block(block.clone()), source);
+                guard!(self.last_block_tx.send(block), sync);
             }
             Message::ShareBlock { block } => {
                 tracing::info!("{} share block {}", self.pubhex, hex::encode(&block.hash));
@@ -347,7 +351,11 @@ impl Peer {
                                 let mut blkch = peer.blockchain.lock().await;
                                 if blkch.cache.len() > 0 {
                                     let block = guard!(peer.create_next_block(&mut *blkch).await, source);
-                                    guard!(peer.broadcast(Message::ShareBlock { block }).await, source);
+                                    guard!(
+                                        peer.broadcast(Message::ShareBlock { block: block.clone() }).await,
+                                        source
+                                    );
+                                    guard!(peer.last_block_tx.send(block), sync);
                                     break;
                                 }
                             }
@@ -363,7 +371,12 @@ impl Peer {
                 }
                 guard!(self.blockchain.lock().await.add_block(block.clone()), source);
 
-                guard!(self.broadcast_except(Message::ShareBlock { block }, &cl).await, source);
+                guard!(
+                    self.broadcast_except(Message::ShareBlock { block: block.clone() }, &cl)
+                        .await,
+                    source
+                );
+                guard!(self.last_block_tx.send(block), sync);
             }
         }
 

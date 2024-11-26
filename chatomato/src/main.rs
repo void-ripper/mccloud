@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{fs::File, sync::Arc};
 
 use components::{create_user::CreateUser, main::MainView, popup::Popup, Component};
 use db::{Database, PrivateUser};
@@ -89,6 +89,9 @@ impl Widget for &App {
 
 fn main() {
     let cfg = config::load().unwrap();
+
+    let writter = File::create(cfg.data.join("chatomato.log")).unwrap();
+    tracing_subscriber::fmt().with_ansi(false).with_writer(writter).init();
 
     if !cfg.data.exists() {
         std::fs::create_dir_all(&cfg.data).unwrap();
