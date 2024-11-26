@@ -29,13 +29,8 @@ impl Component for Popup {
             _ => {}
         }
     }
-}
 
-impl Widget for &Popup {
-    fn render(self, area: Rect, buf: &mut Buffer)
-    where
-        Self: Sized,
-    {
+    fn render(&self, _: &State, area: Rect, buf: &mut Buffer) {
         if self.show {
             let blk = Block::bordered().title(" Actions ");
             let lines: Vec<Line> = vec![

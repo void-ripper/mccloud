@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use ratatui::{
     buffer::Buffer,
     crossterm::event::KeyCode,
@@ -8,22 +6,18 @@ use ratatui::{
     widgets::{Block, Clear, Paragraph, Widget},
 };
 
-use crate::{center, config::Config, db::Database, Active};
+use crate::{center, Active};
 
 use super::{main::MainView, Component, State};
 
 pub struct CreateUser {
-    cfg: Config,
     inbuffer: String,
-    db: Arc<Database>,
 }
 
 impl CreateUser {
-    pub fn new(cfg: Config, db: Arc<Database>) -> Self {
+    pub fn new() -> Self {
         Self {
-            cfg,
             inbuffer: String::new(),
-            db,
         }
     }
 }
@@ -36,10 +30,10 @@ impl Component for CreateUser {
             }
             KeyCode::Enter => {
                 if self.inbuffer.len() > 3 {
-                    match self.db.create_user(self.inbuffer.clone()) {
+                    match state.db.create_user(self.inbuffer.clone()) {
                         Ok(user) => {
                             state.user = Some(user);
-                            state.next = Some(Active::Main(MainView::new(self.db.clone())));
+                            state.next = Some(Active::Main(MainView::new()));
                         }
                         Err(e) => {
                             tracing::error!("{e}");
@@ -54,13 +48,8 @@ impl Component for CreateUser {
             _ => {}
         }
     }
-}
 
-impl Widget for &CreateUser {
-    fn render(self, area: Rect, buf: &mut Buffer)
-    where
-        Self: Sized,
-    {
+    fn render(&self, _state: &State, area: Rect, buf: &mut Buffer) {
         let center = center(area, Constraint::Percentage(50), Constraint::Percentage(50));
 
         Clear.render(center, buf);

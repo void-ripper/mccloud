@@ -1,14 +1,13 @@
-use std::sync::Arc;
-
 use ratatui::{
     buffer::Buffer,
     crossterm::event::KeyCode,
     layout::{Constraint, Layout, Rect},
     style::Stylize,
+    text::Line,
     widgets::{Block, Clear, Paragraph, Widget},
 };
 
-use crate::{center, db::Database};
+use crate::center;
 
 use super::{Component, State};
 
@@ -20,18 +19,20 @@ enum Focus {
 }
 
 pub struct MainView {
-    db: Arc<Database>,
     focus: Focus,
+    selected_room: usize,
     input_buffer: String,
+    room_name: String,
     show_create_room: bool,
 }
 
 impl MainView {
-    pub fn new(db: Arc<Database>) -> Self {
+    pub fn new() -> Self {
         Self {
-            db,
             focus: Focus::Rooms,
+            selected_room: 0,
             input_buffer: String::new(),
+            room_name: String::new(),
             show_create_room: false,
         }
     }
@@ -44,10 +45,19 @@ impl MainView {
         }
     }
 
-    fn show_rooms(&self, area: Rect, buf: &mut Buffer) {
+    fn show_rooms(&self, state: &State, area: Rect, buf: &mut Buffer) {
         let blk = self.is_focused(Block::bordered().title(" Rooms "), Focus::Rooms);
 
-        Paragraph::new("").block(blk).render(area, buf);
+        let mut lines: Vec<Line> = Vec::new();
+        for (idx, room) in state.rooms.iter().enumerate() {
+            let line: Line = room.name.as_str().into();
+            lines.push(if idx == self.selected_room {
+                line.white().on_light_blue()
+            } else {
+                line
+            });
+        }
+        Paragraph::new(lines).block(blk).render(area, buf);
     }
 
     fn show_messages(&self, area: Rect, buf: &mut Buffer) {
@@ -68,11 +78,11 @@ impl MainView {
     }
 
     fn show_create_room_popup(&self, area: Rect, buf: &mut Buffer) {
-        let area = center(area, Constraint::Percentage(50), Constraint::Percentage(50));
+        let area = center(area, Constraint::Percentage(15), Constraint::Length(3));
 
         Clear.render(area, buf);
         let blk = Block::bordered().title(" New Room ");
-        Paragraph::new(self.input_buffer.as_str()).block(blk).render(area, buf);
+        Paragraph::new(self.room_name.as_str()).block(blk).render(area, buf);
     }
 }
 
@@ -82,17 +92,23 @@ impl Component for MainView {
             match ev {
                 KeyCode::Esc => {
                     self.show_create_room = false;
-                    self.input_buffer.clear();
+                    self.room_name.clear();
                 }
                 KeyCode::Enter => {
                     self.show_create_room = false;
 
                     if let Some(user) = &state.user {
-                        self.db.create_room(self.input_buffer.clone(), user.user.pubkey);
-                        state.update_rooms();
+                        match state.db.create_room(self.room_name.clone(), user.user.pubkey) {
+                            Ok(_) => {
+                                state.update_rooms();
+                            }
+                            Err(e) => {
+                                tracing::error!("{e}");
+                            }
+                        }
                     }
 
-                    self.input_buffer.clear();
+                    self.room_name.clear();
                 }
                 KeyCode::Char(a) => {
                     self.input_buffer.push(a);
@@ -120,17 +136,12 @@ impl Component for MainView {
             }
         }
     }
-}
 
-impl Widget for &MainView {
-    fn render(self, area: Rect, buf: &mut Buffer)
-    where
-        Self: Sized,
-    {
+    fn render(&self, state: &State, area: Rect, buf: &mut Buffer) {
         let layout = Layout::horizontal([Constraint::Percentage(25), Constraint::Percentage(75)]).split(area);
         let left = Layout::vertical([Constraint::Percentage(50), Constraint::Percentage(50)]).split(layout[0]);
 
-        self.show_rooms(left[0], buf);
+        self.show_rooms(state, left[0], buf);
         self.show_messages(left[1], buf);
         self.show_chat(layout[1], buf);
 

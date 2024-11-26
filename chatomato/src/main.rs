@@ -1,8 +1,7 @@
 use std::{fs::File, sync::Arc};
 
 use components::{create_user::CreateUser, main::MainView, popup::Popup, Component};
-use db::{Database, PrivateUser};
-use indexmap::IndexSet;
+use db::{Database, PrivateUser, Room};
 use k256::{elliptic_curve::sec1::ToEncodedPoint, SecretKey};
 use ratatui::{
     buffer::Buffer,
@@ -30,16 +29,15 @@ pub fn bottom_right(area: Rect, horizontal: Constraint, vertical: Constraint) ->
 
 pub struct State {
     pub db: Arc<Database>,
-    pub rooms: IndexSet<String>,
+    pub rooms: Vec<Room>,
     pub quit: bool,
     pub user: Option<PrivateUser>,
     pub next: Option<Active>,
 }
 
 impl State {
-    pub(crate) fn update_rooms(&mut self) {
-        let rooms = self.db.list_rooms().unwrap();
-        self.rooms.extend(rooms.iter().map(|r| r.name.clone()));
+    pub fn update_rooms(&mut self) {
+        self.rooms = self.db.list_rooms().unwrap();
     }
 }
 
@@ -56,10 +54,10 @@ impl Active {
         }
     }
 
-    fn render(&self, area: Rect, buf: &mut Buffer) {
+    fn render(&self, state: &State, area: Rect, buf: &mut Buffer) {
         match self {
-            Self::Main(main) => main.render(area, buf),
-            Self::CreateUser(cu) => cu.render(area, buf),
+            Self::Main(main) => main.render(state, area, buf),
+            Self::CreateUser(cu) => cu.render(state, area, buf),
         }
     }
 }
@@ -82,8 +80,8 @@ impl Widget for &App {
     where
         Self: Sized,
     {
-        self.active.render(area, buf);
-        self.popup.render(area, buf);
+        self.active.render(&self.state, area, buf);
+        self.popup.render(&self.state, area, buf);
     }
 }
 
@@ -112,16 +110,16 @@ fn main() {
     };
     let mut app = App {
         state: State {
-            rooms: IndexSet::new(),
+            rooms: Vec::new(),
             db: db.clone(),
             quit: false,
             user,
             next: None,
         },
         active: if exists {
-            Active::Main(MainView::new(db.clone()))
+            Active::Main(MainView::new())
         } else {
-            Active::CreateUser(CreateUser::new(cfg.clone(), db.clone()))
+            Active::CreateUser(CreateUser::new())
         },
         popup: Popup::new(exists),
     };
