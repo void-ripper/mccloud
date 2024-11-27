@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::{path::PathBuf, time::Duration};
 
 use clap::Parser;
 
@@ -27,6 +27,8 @@ async fn main() {
     let cfg = mcriddle::Config {
         addr: format!("{}:{}", args.host, args.port),
         folder: args.data,
+        keep_alive: Duration::from_millis(250),
+        data_gather_time: Duration::from_millis(500),
     };
     let peer = mcriddle::Peer::new(cfg).unwrap();
 

@@ -4,6 +4,7 @@ use std::{
         atomic::{AtomicU32, Ordering},
         Arc,
     },
+    time::Duration,
 };
 
 use borsh::{BorshDeserialize, BorshSerialize};
@@ -88,6 +89,8 @@ impl Database {
         let peer_cfg = mcriddle::Config {
             addr: cfg.addr.clone().into(),
             folder: cfg.data.clone(),
+            keep_alive: Duration::from_millis(250),
+            data_gather_time: Duration::from_millis(500),
         };
         let p = ex!(
             rt.block_on(async {

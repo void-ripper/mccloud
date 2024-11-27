@@ -1,6 +1,6 @@
 use borsh::{BorshDeserialize, BorshSerialize};
 
-use crate::{blockchain::Block, HashBytes, PubKeyBytes};
+use crate::{blockchain::Block, HashBytes, PubKeyBytes, SignBytes};
 
 #[derive(BorshSerialize, BorshDeserialize)]
 pub enum Message {
@@ -9,13 +9,10 @@ pub enum Message {
         root: Option<HashBytes>,
         last: Option<HashBytes>,
         count: u64,
-        known: Vec<PubKeyBytes>,
     },
-    Announce {
+    KeepAlive {
         pubkey: PubKeyBytes,
-    },
-    Remove {
-        pubkey: PubKeyBytes,
+        sign: SignBytes,
     },
     ShareData {
         data: Vec<u8>,

@@ -6,14 +6,18 @@ use std::{
         atomic::{AtomicBool, Ordering},
         Arc, Weak,
     },
-    time::Duration,
+    time::{Duration, SystemTime},
 };
 
 use blockchain::{Block, BlockIterator, Blockchain};
 use client::Client;
 pub use error::{Error, Result};
-use indexmap::IndexSet;
+use indexmap::{IndexMap, IndexSet};
 use k256::{
+    ecdsa::{
+        signature::{Signer, Verifier},
+        Signature, SigningKey, VerifyingKey,
+    },
     elliptic_curve::{rand_core::OsRng, sec1::ToEncodedPoint},
     SecretKey,
 };
@@ -22,6 +26,7 @@ use tokio::{
     net::{TcpListener, TcpStream},
     select,
     sync::{broadcast, mpsc, Mutex},
+    time::{self},
 };
 
 mod blockchain;
@@ -44,6 +49,8 @@ pub type SignBytes = [u8; 64];
 pub struct Config {
     pub addr: String,
     pub folder: PathBuf,
+    pub keep_alive: Duration,
+    pub data_gather_time: Duration,
 }
 
 type Clients = HashMap<PubKeyBytes, Arc<Mutex<Client>>>;
@@ -58,7 +65,7 @@ pub struct Peer {
     to_handle_tx: mpsc::Sender<(Message, Arc<Mutex<Client>>)>,
     to_shutdown: Arc<AtomicBool>,
     clients: Mutex<Clients>,
-    known: Mutex<IndexSet<PubKeyBytes>>,
+    known: Mutex<IndexMap<PubKeyBytes, SystemTime>>,
     blockchain: Mutex<Blockchain>,
 }
 
@@ -103,7 +110,7 @@ impl Peer {
             to_handle_tx: mtx,
             to_shutdown,
             clients: Mutex::new(HashMap::new()),
-            known: Mutex::new(IndexSet::new()),
+            known: Mutex::new(IndexMap::new()),
             blockchain: Mutex::new(blockchain),
         });
 
@@ -111,6 +118,29 @@ impl Peer {
         tokio::spawn(async move {
             if let Err(e) = p0.listen(mrx).await {
                 tracing::error!("{} Loop: {e}", p0.pubhex);
+            }
+        });
+
+        let p1 = peer.clone();
+        tokio::spawn(async move {
+            let mut interval = time::interval(p1.cfg.keep_alive);
+            let signer = SigningKey::from(&p1.prikey);
+            let sign: Signature = signer.sign(&p1.pubkey);
+            let mut sign_bytes = [0u8; 64];
+            sign_bytes.copy_from_slice(&sign.to_vec());
+
+            while !p1.to_shutdown.load(Ordering::SeqCst) {
+                interval.tick().await;
+
+                if let Err(e) = p1
+                    .broadcast(Message::KeepAlive {
+                        pubkey: p1.pubkey,
+                        sign: sign_bytes,
+                    })
+                    .await
+                {
+                    tracing::error!("{} {}", p1.pubhex, e);
+                }
             }
         });
 
@@ -181,31 +211,28 @@ impl Peer {
             sck: writer,
             pubkey: [0u8; 33],
             shared: None,
-            nonce: 0,
+            tx_nonce: 0,
         };
 
         let greeting = {
             let blkch = self.blockchain.lock().await;
-            let known = self.known.lock().await.iter().cloned().collect();
             Message::Greeting {
                 pubkey: self.pubkey.clone(),
                 root: blkch.root.clone(),
                 last: blkch.last.clone(),
                 count: blkch.count,
-                known,
             }
         };
 
         ex!(cl.write(&greeting).await, source);
 
-        let greeting = ex!(Client::read(&mut reader, &cl.shared).await, source);
+        let (nonce, greeting) = ex!(Client::read(&mut reader, &cl.shared).await, source);
 
         if let Message::Greeting {
             pubkey,
             root,
             last: _,
             count,
-            known,
         } = greeting
         {
             tracing::info!(
@@ -218,15 +245,6 @@ impl Peer {
             cl.pubkey = pubkey.clone();
             cl.shared_secret(&self.prikey);
 
-            {
-                let mut kn = self.known.lock().await;
-                if kn.insert(pubkey.clone()) {
-                    let msg = Message::Announce { pubkey };
-                    ex!(self.broadcast(msg).await, source);
-                }
-                kn.extend(known);
-                kn.shift_remove(&self.pubkey);
-            }
             let mut blkch = self.blockchain.lock().await;
 
             if root.is_none() && blkch.root.is_none() {
@@ -264,13 +282,21 @@ impl Peer {
         let cl0 = cl.clone();
         self.clients.lock().await.insert(pubkey, cl0);
 
+        let peer = self.me.upgrade().unwrap();
+
         tokio::spawn(async move {
+            let mut rx_nonce = nonce;
             loop {
                 let msg = Client::read(&mut reader, &shared).await;
                 match msg {
-                    Ok(msg) => {
-                        if let Err(e) = to_handle.send((msg, cl.clone())).await {
-                            tracing::error!("{} {}", pubhex, e);
+                    Ok((nonce, msg)) => {
+                        if nonce > rx_nonce {
+                            rx_nonce = nonce;
+                            if let Err(e) = to_handle.send((msg, cl.clone())).await {
+                                tracing::error!("{} {}", pubhex, e);
+                            }
+                        } else {
+                            tracing::warn!("{} nonce to low, omit message", pubhex);
                         }
                     }
                     Err(e) => {
@@ -280,9 +306,7 @@ impl Peer {
                 }
             }
 
-            if let Err(e) = to_handle.send((Message::Remove { pubkey }, cl.clone())).await {
-                tracing::error!("{} {}", pubhex, e);
-            }
+            peer.clients.lock().await.remove(&pubkey);
         });
 
         Ok(())
@@ -293,7 +317,9 @@ impl Peer {
 
         let next_author = {
             let k = self.known.lock().await;
-            k[rand::random::<usize>() % k.len()]
+            k.get_index(rand::random::<usize>() % k.len())
+                .map(|(k, _v)| k.clone())
+                .unwrap()
         };
         let blk = blkch.create_block(next_author, self.pubkey.clone(), &self.prikey);
         ex!(blkch.add_block(blk.clone()), source);
@@ -306,22 +332,27 @@ impl Peer {
             Message::Greeting { .. } => {
                 tracing::error!("{} we should never get a second greeting", self.pubhex);
             }
-            Message::Announce { pubkey } => {
-                if pubkey != self.pubkey && self.known.lock().await.insert(pubkey.clone()) {
-                    tracing::info!("{} announce {}", self.pubhex, hex::encode(&pubkey));
-                    let msg = Message::Announce { pubkey };
-                    ex!(self.broadcast_except(msg, &cl).await, source);
+            Message::KeepAlive { pubkey, sign } => {
+                if pubkey == self.pubkey {
+                    return Ok(());
                 }
-            }
-            Message::Remove { pubkey } => {
-                tracing::info!("{} remove {}", self.pubhex, hex::encode(&pubkey));
-                let was_known = self.known.lock().await.swap_remove(&pubkey);
+                let verifier = ex!(VerifyingKey::from_sec1_bytes(&pubkey), encrypt);
+                let signature = ex!(Signature::from_slice(&sign), encrypt);
+                ex!(verifier.verify(&pubkey, &signature), encrypt);
 
-                self.clients.lock().await.remove(&pubkey);
+                if let Some(old) = self.known.lock().await.insert(pubkey.clone(), SystemTime::now()) {
+                    // tracing::debug!("{} keep alive {}", self.pubhex, hex::encode(&pubkey));
+                    let elapsed = old.elapsed().unwrap();
+                    let delta = if elapsed > self.cfg.keep_alive {
+                        0
+                    } else {
+                        (self.cfg.keep_alive - elapsed).as_millis()
+                    };
 
-                if was_known {
-                    let msg = Message::Remove { pubkey };
-                    ex!(self.broadcast(msg).await, source);
+                    if delta < 50 {
+                        let msg = Message::KeepAlive { pubkey, sign };
+                        ex!(self.broadcast_except(msg, &cl).await, source);
+                    }
                 }
             }
             Message::ShareData { data } => {
@@ -357,7 +388,7 @@ impl Peer {
                     tokio::spawn(async move {
                         let res: Result<()> = async {
                             loop {
-                                tokio::time::sleep(Duration::from_millis(1_000)).await;
+                                tokio::time::sleep(peer.cfg.data_gather_time).await;
 
                                 let mut blkch = peer.blockchain.lock().await;
                                 if blkch.cache.len() > 0 {
@@ -376,7 +407,7 @@ impl Peer {
                         .await;
 
                         if let Err(e) = res {
-                            tracing::error!("{e}");
+                            tracing::error!("{} {}", peer.pubhex, e);
                         }
                     });
                 }
@@ -404,7 +435,7 @@ impl Peer {
     }
 
     pub async fn known_pubkeys(&self) -> IndexSet<PubKeyBytes> {
-        self.known.lock().await.clone()
+        self.known.lock().await.keys().cloned().collect()
     }
 
     pub async fn connect(&self, addr: SocketAddr) -> Result<()> {
