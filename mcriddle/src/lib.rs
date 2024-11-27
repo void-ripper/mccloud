@@ -190,7 +190,7 @@ impl Peer {
                 msg = to_handle.recv() => {
                     if let Some((msg, cl)) = msg {
                         if let Err(e) = self.on_message(msg,cl ).await {
-                            tracing::error!("{e}");
+                            tracing::error!("{} {}", self.pubhex, e);
                         }
                     }
                 }
@@ -245,6 +245,7 @@ impl Peer {
             cl.pubkey = pubkey.clone();
             cl.shared_secret(&self.prikey);
 
+            self.known.lock().await.insert(pubkey, SystemTime::now());
             let mut blkch = self.blockchain.lock().await;
 
             if root.is_none() && blkch.root.is_none() {
