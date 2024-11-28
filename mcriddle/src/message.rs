@@ -9,6 +9,7 @@ pub enum Message {
         root: Option<HashBytes>,
         last: Option<HashBytes>,
         count: u64,
+        thin: bool,
     },
     KeepAlive {
         pubkey: PubKeyBytes,

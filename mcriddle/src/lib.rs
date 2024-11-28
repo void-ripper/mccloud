@@ -51,6 +51,7 @@ pub struct Config {
     pub folder: PathBuf,
     pub keep_alive: Duration,
     pub data_gather_time: Duration,
+    pub thin: bool,
 }
 
 type Clients = HashMap<PubKeyBytes, Arc<Mutex<Client>>>;
@@ -121,28 +122,30 @@ impl Peer {
             }
         });
 
-        let p1 = peer.clone();
-        tokio::spawn(async move {
-            let mut interval = time::interval(p1.cfg.keep_alive);
-            let signer = SigningKey::from(&p1.prikey);
-            let sign: Signature = signer.sign(&p1.pubkey);
-            let mut sign_bytes = [0u8; 64];
-            sign_bytes.copy_from_slice(&sign.to_vec());
+        if !peer.cfg.thin {
+            let p1 = peer.clone();
+            tokio::spawn(async move {
+                let mut interval = time::interval(p1.cfg.keep_alive);
+                let signer = SigningKey::from(&p1.prikey);
+                let sign: Signature = signer.sign(&p1.pubkey);
+                let mut sign_bytes = [0u8; 64];
+                sign_bytes.copy_from_slice(&sign.to_vec());
 
-            while !p1.to_shutdown.load(Ordering::SeqCst) {
-                interval.tick().await;
+                while !p1.to_shutdown.load(Ordering::SeqCst) {
+                    interval.tick().await;
 
-                if let Err(e) = p1
-                    .broadcast(Message::KeepAlive {
-                        pubkey: p1.pubkey,
-                        sign: sign_bytes,
-                    })
-                    .await
-                {
-                    tracing::error!("{} {}", p1.pubhex, e);
+                    if let Err(e) = p1
+                        .broadcast(Message::KeepAlive {
+                            pubkey: p1.pubkey,
+                            sign: sign_bytes,
+                        })
+                        .await
+                    {
+                        tracing::error!("{} {}", p1.pubhex, e);
+                    }
                 }
-            }
-        });
+            });
+        }
 
         Ok(peer)
     }
@@ -221,6 +224,7 @@ impl Peer {
                 root: blkch.root.clone(),
                 last: blkch.last.clone(),
                 count: blkch.count,
+                thin: self.cfg.thin,
             }
         };
 
@@ -233,6 +237,7 @@ impl Peer {
             root,
             last: _,
             count,
+            thin,
         } = greeting
         {
             tracing::info!(
@@ -245,10 +250,13 @@ impl Peer {
             cl.pubkey = pubkey.clone();
             cl.shared_secret(&self.prikey);
 
-            self.known.lock().await.insert(pubkey, SystemTime::now());
+            if !thin {
+                self.known.lock().await.insert(pubkey, SystemTime::now());
+            }
+
             let mut blkch = self.blockchain.lock().await;
 
-            if root.is_none() && blkch.root.is_none() {
+            if !self.cfg.thin && !thin && root.is_none() && blkch.root.is_none() {
                 if self.pubkey > pubkey {
                     tracing::info!("{} create genesis block", self.pubhex);
                     blkch.cache.insert(b"[genesis]".to_vec());
