@@ -12,7 +12,7 @@ use std::{
 use blockchain::{Block, BlockIterator, Blockchain};
 use client::Client;
 pub use error::{Error, Result};
-use indexmap::{IndexMap, IndexSet};
+use indexmap::{map::MutableKeys, IndexMap, IndexSet};
 use k256::{
     ecdsa::{
         signature::{Signer, Verifier},
@@ -143,6 +143,11 @@ impl Peer {
                     {
                         tracing::error!("{} {}", p1.pubhex, e);
                     }
+
+                    p1.known.lock().await.retain(|_k, v| {
+                        let elapsed = v.elapsed().unwrap();
+                        elapsed < p1.cfg.keep_alive
+                    });
                 }
             });
         }
@@ -349,7 +354,8 @@ impl Peer {
                 let signature = ex!(Signature::from_slice(&sign), encrypt);
                 ex!(verifier.verify(&pubkey, &signature), encrypt);
 
-                if let Some(old) = self.known.lock().await.insert(pubkey.clone(), SystemTime::now()) {
+                let previous = self.known.lock().await.insert(pubkey.clone(), SystemTime::now());
+                if let Some(old) = previous {
                     // tracing::debug!("{} keep alive {}", self.pubhex, hex::encode(&pubkey));
                     let elapsed = old.elapsed().unwrap();
                     let delta = if elapsed > self.cfg.keep_alive {
@@ -362,6 +368,9 @@ impl Peer {
                         let msg = Message::KeepAlive { pubkey, sign };
                         ex!(self.broadcast_except(msg, &cl).await, source);
                     }
+                } else if previous.is_none() {
+                    let msg = Message::KeepAlive { pubkey, sign };
+                    ex!(self.broadcast_except(msg, &cl).await, source);
                 }
             }
             Message::ShareData { data } => {
