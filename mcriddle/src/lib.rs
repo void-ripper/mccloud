@@ -12,7 +12,7 @@ use std::{
 use blockchain::{Block, BlockIterator, Blockchain};
 use client::Client;
 pub use error::{Error, Result};
-use indexmap::{map::MutableKeys, IndexMap, IndexSet};
+use indexmap::{IndexMap, IndexSet};
 use k256::{
     ecdsa::{
         signature::{Signer, Verifier},
@@ -145,8 +145,11 @@ impl Peer {
                     }
 
                     p1.known.lock().await.retain(|_k, v| {
-                        let elapsed = v.elapsed().unwrap();
-                        elapsed < p1.cfg.keep_alive
+                        if let Ok(elapsed) = v.elapsed() {
+                            elapsed < p1.cfg.keep_alive
+                        } else {
+                            false
+                        }
                     });
                 }
             });
@@ -357,8 +360,8 @@ impl Peer {
                 let previous = self.known.lock().await.insert(pubkey.clone(), SystemTime::now());
                 if let Some(old) = previous {
                     // tracing::debug!("{} keep alive {}", self.pubhex, hex::encode(&pubkey));
-                    let elapsed = old.elapsed().unwrap();
-                    let delta = if elapsed > self.cfg.keep_alive {
+                    let elapsed = old.elapsed().unwrap_or(self.cfg.keep_alive);
+                    let delta = if elapsed >= self.cfg.keep_alive {
                         0
                     } else {
                         (self.cfg.keep_alive - elapsed).as_millis()
@@ -404,9 +407,10 @@ impl Peer {
 
                     let peer = self.me.upgrade().unwrap();
                     tokio::spawn(async move {
+                        let mut interval = time::interval(peer.cfg.data_gather_time);
                         let res: Result<()> = async {
                             loop {
-                                tokio::time::sleep(peer.cfg.data_gather_time).await;
+                                interval.tick().await;
 
                                 let mut blkch = peer.blockchain.lock().await;
                                 if blkch.cache.len() > 0 {
