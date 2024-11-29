@@ -91,6 +91,7 @@ impl Database {
             folder: cfg.data.clone(),
             keep_alive: Duration::from_millis(250),
             data_gather_time: Duration::from_millis(500),
+            thin: true,
         };
         let p = ex!(
             rt.block_on(async {

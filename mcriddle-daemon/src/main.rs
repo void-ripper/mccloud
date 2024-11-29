@@ -29,6 +29,7 @@ async fn main() {
         folder: args.data,
         keep_alive: Duration::from_millis(250),
         data_gather_time: Duration::from_millis(500),
+        thin: false,
     };
     let peer = mcriddle::Peer::new(cfg).unwrap();
 
