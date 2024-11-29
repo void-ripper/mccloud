@@ -23,6 +23,8 @@ impl CreateUser {
 }
 
 impl Component for CreateUser {
+    fn on_update(&mut self, _update: &crate::db::Update) {}
+
     fn on_press(&mut self, state: &mut State, ev: KeyCode) {
         match ev {
             KeyCode::Esc => {

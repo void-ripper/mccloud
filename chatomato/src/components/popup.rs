@@ -21,6 +21,8 @@ impl Popup {
 }
 
 impl Component for Popup {
+    fn on_update(&mut self, _update: &crate::db::Update) {}
+
     fn on_press(&mut self, _state: &mut State, ev: KeyCode) {
         match ev {
             KeyCode::Char(' ') => {

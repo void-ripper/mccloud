@@ -2,6 +2,7 @@ use std::{
     collections::HashMap,
     sync::{
         atomic::{AtomicU32, Ordering},
+        mpsc::SyncSender,
         Arc,
     },
     time::Duration,
@@ -45,6 +46,14 @@ pub struct PrivateUser {
     pub secret: SecretKey,
 }
 
+pub enum Update {
+    RoomMessage {
+        user: [u8; 33],
+        room: String,
+        message: String,
+    },
+}
+
 #[derive(BorshSerialize, BorshDeserialize)]
 enum Envelope {
     Calledback { msg: Message, cb: u32 },
@@ -53,8 +62,24 @@ enum Envelope {
 
 #[derive(BorshSerialize, BorshDeserialize)]
 enum Message {
-    CreateUser { pubkey: [u8; 33], name: String },
-    CreateRoom { pubkey: [u8; 33], name: String },
+    CreateUser {
+        pubkey: [u8; 33],
+        name: String,
+    },
+    CreateRoom {
+        pubkey: [u8; 33],
+        name: String,
+    },
+    CreateMessage {
+        pubkey: [u8; 33],
+        room: String,
+        message: String,
+    },
+    CreatePrivateMessage {
+        from: [u8; 33],
+        to: [u8; 33],
+        message: String,
+    },
 }
 
 enum Answer {
@@ -75,7 +100,7 @@ pub struct Database {
 }
 
 impl Database {
-    pub fn new(cfg: Config) -> Result<Self> {
+    pub fn new(cfg: Config, tx: SyncSender<Update>) -> Result<Self> {
         let dbfile = cfg.data.join("data.db");
         let existed = dbfile.exists();
         let db = ex!(rusqlite::Connection::open(&dbfile), sqlite);
@@ -124,8 +149,17 @@ impl Database {
                             Message::CreateRoom { pubkey, name } => {
                                 Database::handle_create_room(&db0, &cb0, pubkey, name, cb).await
                             }
+                            _ => Ok(()),
                         },
-                        Envelope::Oneshot { msg } => Ok(()),
+                        Envelope::Oneshot { msg } => match msg {
+                            Message::CreateMessage { pubkey, room, message } => {
+                                Database::handle_create_message(&db0, &tx, pubkey, room, message).await
+                            }
+                            Message::CreatePrivateMessage { from, to, message } => {
+                                Database::handle_create_private_message(&db0, from, to, message).await
+                            }
+                            _ => Ok(()),
+                        },
                     };
 
                     if let Err(e) = res {
@@ -169,6 +203,15 @@ impl Database {
         );
 
         Ok(answer)
+    }
+
+    fn share_oneshot(&self, msg: Message) -> Result<()> {
+        let data = ex!(borsh::to_vec(&Envelope::Oneshot { msg }), io);
+
+        let peer = self.peer.clone();
+        ex!(self.rt.block_on(async move { peer.share(data).await }), riddle);
+
+        Ok(())
     }
 
     async fn handle_create_user(db: &SafeConn, cbs: &Callbacks, pubkey: [u8; 33], name: String, cb: u32) -> Result<()> {
@@ -279,6 +322,74 @@ impl Database {
             Ok(rooms)
         });
         rooms
+    }
+
+    async fn handle_create_message(
+        db: &SafeConn,
+        tx: &SyncSender<Update>,
+        pubkey: [u8; 33],
+        room: String,
+        message: String,
+    ) -> Result<()> {
+        let sql = r#"
+        INSERT INTO room_message(room_id, user_id, message) 
+        VALUES(
+            (SELECT id FROM room WHERE name = ?1),
+            (SELECT id FROM user WHERE pubkey = ?2),
+            ?3
+        )"#;
+        let db = db.lock().await;
+        let mut stmt = ex!(db.prepare_cached(sql), sqlite);
+        ex!(stmt.execute((&room, pubkey, &message)), sqlite);
+
+        tx.send(Update::RoomMessage {
+            user: pubkey,
+            room,
+            message,
+        });
+
+        Ok(())
+    }
+
+    pub fn create_message(&self, puser: &PrivateUser, room: &Room, msg: &str) -> Result<()> {
+        ex!(
+            self.share_oneshot(Message::CreateMessage {
+                pubkey: puser.user.pubkey,
+                room: room.name.clone(),
+                message: msg.to_string()
+            }),
+            source
+        );
+
+        Ok(())
+    }
+
+    async fn handle_create_private_message(db: &SafeConn, from: [u8; 33], to: [u8; 33], message: String) -> Result<()> {
+        let sql = r#"
+            INSERT INTO user_message(from_user, to_user, message)
+            VALUES(
+                (SELECT id FROM user WHERE pubkey = ?1),
+                (SELECT id FROM user WHERE pubkey = ?2),
+                ?3
+            )
+        "#;
+        let db = db.lock().await;
+        let mut stmt = ex!(db.prepare_cached(sql), sqlite);
+        ex!(stmt.execute((from, to, message)), sqlite);
+
+        Ok(())
+    }
+
+    pub fn create_private_message(&self, puser: &PrivateUser, to: [u8; 33], msg: &str) -> Result<()> {
+        ex!(
+            self.share_oneshot(Message::CreatePrivateMessage {
+                from: puser.user.pubkey,
+                to,
+                message: msg.to_string()
+            }),
+            source
+        );
+        Ok(())
     }
 
     pub fn user_by_key(&self, pubkey: [u8; 33]) -> Result<User> {

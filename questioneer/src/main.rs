@@ -1,4 +1,4 @@
-use std::{collections::HashSet, net::SocketAddr, path::PathBuf, sync::Arc};
+use std::{collections::HashSet, net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 
 use indexmap::IndexMap;
 use mcriddle::{Config, Peer};
@@ -41,6 +41,9 @@ impl App {
         let cfg = Config {
             addr: format!("127.0.0.1:{}", self.port_pool),
             folder: PathBuf::from("data").join(self.port_pool.to_string()),
+            keep_alive: Duration::from_millis(250),
+            data_gather_time: Duration::from_millis(500),
+            thin: false,
         };
         self.port_pool += 1;
 

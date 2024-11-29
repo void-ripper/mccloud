@@ -1,4 +1,8 @@
-use std::{fs::File, sync::Arc};
+use std::{
+    fs::File,
+    sync::{mpsc, Arc},
+    time::Duration,
+};
 
 use components::{create_user::CreateUser, main::MainView, popup::Popup, Component};
 use db::{Database, PrivateUser, Room};
@@ -95,9 +99,11 @@ fn main() {
         std::fs::create_dir_all(&cfg.data).unwrap();
     }
 
+    let (tx, rx) = mpsc::sync_channel(5);
+
     let prikey = cfg.data.join("private.key");
     let exists = prikey.exists();
-    let db = Arc::new(Database::new(cfg.clone()).unwrap());
+    let db = Arc::new(Database::new(cfg.clone(), tx).unwrap());
     let user = if exists {
         let data = std::fs::read(&prikey).unwrap();
         let secret = SecretKey::from_slice(&data).unwrap();
@@ -134,26 +140,30 @@ fn main() {
             break;
         }
 
-        match event::read() {
-            Ok(event::Event::Key(ev)) => {
-                if ev.kind == KeyEventKind::Press {
-                    app.on_press(ev.code);
+        if let Ok(true) = event::poll(Duration::from_millis(500)) {
+            match event::read() {
+                Ok(event::Event::Key(ev)) => {
+                    if ev.kind == KeyEventKind::Press {
+                        app.on_press(ev.code);
 
-                    if app.state.quit {
-                        break;
+                        if app.state.quit {
+                            break;
+                        }
                     }
                 }
+                Err(e) => {
+                    err = Some(e);
+                    break;
+                }
+                _ => {}
             }
-            Err(e) => {
-                err = Some(e);
-                break;
-            }
-            _ => {}
         }
 
         if let Some(next) = app.state.next.take() {
             app.active = next;
         }
+
+        while let Ok(update) = rx.try_recv() {}
     }
 
     ratatui::restore();

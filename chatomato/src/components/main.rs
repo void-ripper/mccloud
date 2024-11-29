@@ -7,7 +7,7 @@ use ratatui::{
     widgets::{Block, Clear, Paragraph, Widget},
 };
 
-use crate::center;
+use crate::{center, db::Update};
 
 use super::{Component, State};
 
@@ -84,9 +84,36 @@ impl MainView {
         let blk = Block::bordered().title(" New Room ");
         Paragraph::new(self.room_name.as_str()).block(blk).render(area, buf);
     }
+
+    fn general_keys(&mut self, state: &mut State, ev: KeyCode) {
+        match ev {
+            KeyCode::Esc | KeyCode::Char('q') => {
+                state.quit = true;
+            }
+            KeyCode::Char('1') => {
+                self.focus = Focus::Rooms;
+            }
+            KeyCode::Char('2') => {
+                self.focus = Focus::Messages;
+            }
+            KeyCode::Char('3') => {
+                self.focus = Focus::Chat;
+            }
+            KeyCode::Char('c') => {
+                self.show_create_room = true;
+            }
+            _ => {}
+        }
+    }
 }
 
 impl Component for MainView {
+    fn on_update(&mut self, update: &Update) {
+        match update {
+            Update::RoomMessage { user, room, message } => {}
+        }
+    }
+
     fn on_press(&mut self, state: &mut State, ev: KeyCode) {
         if self.show_create_room {
             match ev {
@@ -116,23 +143,32 @@ impl Component for MainView {
                 _ => {}
             }
         } else {
-            match ev {
-                KeyCode::Esc | KeyCode::Char('q') => {
-                    state.quit = true;
+            match self.focus {
+                Focus::Rooms => {
+                    self.general_keys(state, ev);
                 }
-                KeyCode::Char('1') => {
-                    self.focus = Focus::Rooms;
+                Focus::Messages => {
+                    self.general_keys(state, ev);
                 }
-                KeyCode::Char('2') => {
-                    self.focus = Focus::Messages;
-                }
-                KeyCode::Char('3') => {
-                    self.focus = Focus::Chat;
-                }
-                KeyCode::Char('c') => {
-                    self.show_create_room = true;
-                }
-                _ => {}
+                Focus::Chat => match ev {
+                    KeyCode::Esc => {
+                        self.input_buffer.clear();
+                        self.focus = Focus::Rooms;
+                    }
+                    KeyCode::Enter => {
+                        if let Some(puser) = &state.user {
+                            let room = &state.rooms[self.selected_room];
+                            if let Err(e) = state.db.create_message(puser, room, &self.input_buffer) {
+                                tracing::error!("{e}");
+                            }
+                            self.input_buffer.clear();
+                        }
+                    }
+                    KeyCode::Char(a) => {
+                        self.input_buffer.push(a);
+                    }
+                    _ => {}
+                },
             }
         }
     }
