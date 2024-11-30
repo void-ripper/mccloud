@@ -26,7 +26,7 @@ use tokio::{
     net::{TcpListener, TcpStream},
     select,
     sync::{broadcast, mpsc, Mutex},
-    time::{self},
+    time,
 };
 
 mod blockchain;
@@ -386,6 +386,11 @@ impl Peer {
                 }
             }
             Message::RequestBlocks { start } => {
+                tracing::info!(
+                    "{} request for blocks {}",
+                    self.pubhex,
+                    start.map(|n| hex::encode(n)).unwrap_or(String::new())
+                );
                 let blk_it = self.blockchain.lock().await.get_blocks(start);
                 let mut cl = cl.lock().await;
                 for block in blk_it {

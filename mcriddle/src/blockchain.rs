@@ -232,6 +232,7 @@ impl Blockchain {
         }
 
         self.last = Some(blk.hash);
+        self.next_author = Some(blk.next_choice);
         self.count += 1;
 
         let data = ex!(borsh::to_vec(&blk), io);
