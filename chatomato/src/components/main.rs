@@ -1,3 +1,5 @@
+use std::collections::{HashMap, VecDeque};
+
 use ratatui::{
     buffer::Buffer,
     crossterm::event::KeyCode,
@@ -7,7 +9,10 @@ use ratatui::{
     widgets::{Block, Clear, Paragraph, Widget},
 };
 
-use crate::{center, db::Update};
+use crate::{
+    center,
+    db::{Update, User},
+};
 
 use super::{Component, State};
 
@@ -18,12 +23,19 @@ enum Focus {
     Chat,
 }
 
+struct ChatLine {
+    user: User,
+    msg: String,
+}
+
 pub struct MainView {
     focus: Focus,
     selected_room: usize,
     input_buffer: String,
     room_name: String,
     show_create_room: bool,
+    user_cache: HashMap<[u8; 33], User>,
+    lines: VecDeque<ChatLine>,
 }
 
 impl MainView {
@@ -34,6 +46,8 @@ impl MainView {
             input_buffer: String::new(),
             room_name: String::new(),
             show_create_room: false,
+            user_cache: HashMap::new(),
+            lines: VecDeque::new(),
         }
     }
 
@@ -62,6 +76,15 @@ impl MainView {
 
     fn show_messages(&self, area: Rect, buf: &mut Buffer) {
         let blk = self.is_focused(Block::bordered().title(" Messages "), Focus::Messages);
+        let mut lines: Vec<Line> = Vec::new();
+        for l in self.lines.iter() {
+            lines.push(Line::from(vec![
+                l.user.name.clone().into(),
+                "> ".into(),
+                l.msg.clone().into(),
+            ]));
+        }
+
         Paragraph::new("").block(blk).render(area, buf);
     }
 
@@ -69,7 +92,12 @@ impl MainView {
         let layout = Layout::vertical([Constraint::Min(3), Constraint::Length(3)]).split(area);
 
         let blk = self.is_focused(Block::bordered().title(" Chat "), Focus::Chat);
-        Paragraph::new("").block(blk).render(layout[0], buf);
+        let lines: Vec<Line> = self
+            .lines
+            .iter()
+            .map(|l| Line::from(vec![l.user.name.clone().into(), "> ".into(), l.msg.clone().into()]))
+            .collect();
+        Paragraph::new(lines).block(blk).render(layout[0], buf);
 
         let blk = self.is_focused(Block::bordered(), Focus::Chat);
         Paragraph::new(self.input_buffer.as_str())
@@ -92,15 +120,19 @@ impl MainView {
             }
             KeyCode::Char('1') => {
                 self.focus = Focus::Rooms;
+                state.ignore_space = false;
             }
             KeyCode::Char('2') => {
                 self.focus = Focus::Messages;
+                state.ignore_space = false;
             }
             KeyCode::Char('3') => {
                 self.focus = Focus::Chat;
+                state.ignore_space = true;
             }
             KeyCode::Char('c') => {
                 self.show_create_room = true;
+                state.ignore_space = true;
             }
             _ => {}
         }
@@ -108,9 +140,21 @@ impl MainView {
 }
 
 impl Component for MainView {
-    fn on_update(&mut self, update: &Update) {
+    fn on_update(&mut self, state: &mut State, update: &Update) {
         match update {
-            Update::RoomMessage { user, room, message } => {}
+            Update::RoomMessage { user, room, message } => {
+                if self.room_name == *room {
+                    let suser = self
+                        .user_cache
+                        .get(user)
+                        .cloned()
+                        .unwrap_or_else(|| state.db.user_by_key(*user).unwrap());
+                    self.lines.push_back(ChatLine {
+                        user: suser,
+                        msg: message.clone(),
+                    });
+                }
+            }
         }
     }
 
@@ -120,6 +164,7 @@ impl Component for MainView {
                 KeyCode::Esc => {
                     self.show_create_room = false;
                     self.room_name.clear();
+                    state.ignore_space = false;
                 }
                 KeyCode::Enter => {
                     self.show_create_room = false;
@@ -136,6 +181,7 @@ impl Component for MainView {
                     }
 
                     self.room_name.clear();
+                    state.ignore_space = false;
                 }
                 KeyCode::Char(a) => {
                     self.room_name.push(a);
@@ -146,11 +192,39 @@ impl Component for MainView {
             match self.focus {
                 Focus::Rooms => {
                     self.general_keys(state, ev);
+                    match ev {
+                        KeyCode::Char('j') => {
+                            self.room_name = state.rooms[self.selected_room].name.clone();
+                            self.lines.clear();
+                            self.user_cache = state.db.users_in_room(&self.room_name).unwrap();
+                            match state.db.last_20_lines(&self.room_name) {
+                                Ok(lines) => {
+                                    for line in lines {
+                                        self.lines.push_back(ChatLine {
+                                            user: self.user_cache.get(&line.0).cloned().unwrap_or_else(|| User {
+                                                id: -1,
+                                                pubkey: [0u8; 33],
+                                                name: "unknown".into(),
+                                            }),
+                                            msg: line.1,
+                                        });
+                                    }
+                                }
+                                Err(e) => {
+                                    tracing::error!("{e}");
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
                 }
                 Focus::Messages => {
                     self.general_keys(state, ev);
                 }
                 Focus::Chat => match ev {
+                    KeyCode::Backspace => {
+                        self.input_buffer.pop();
+                    }
                     KeyCode::Esc => {
                         self.input_buffer.clear();
                         self.focus = Focus::Rooms;

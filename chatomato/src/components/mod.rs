@@ -7,7 +7,7 @@ pub mod main;
 pub mod popup;
 
 pub trait Component {
-    fn on_update(&mut self, update: &Update);
+    fn on_update(&mut self, state: &mut State, update: &Update);
 
     fn on_press(&mut self, state: &mut State, ev: KeyCode);
 

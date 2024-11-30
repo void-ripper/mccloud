@@ -6,7 +6,7 @@ use ratatui::{
     widgets::{Block, Clear, Paragraph, Widget},
 };
 
-use crate::bottom_right;
+use crate::{bottom_right, db::Update};
 
 use super::{Component, State};
 
@@ -21,14 +21,16 @@ impl Popup {
 }
 
 impl Component for Popup {
-    fn on_update(&mut self, _update: &crate::db::Update) {}
+    fn on_update(&mut self, _state: &mut State, _update: &Update) {}
 
-    fn on_press(&mut self, _state: &mut State, ev: KeyCode) {
-        match ev {
-            KeyCode::Char(' ') => {
-                self.show = !self.show;
+    fn on_press(&mut self, state: &mut State, ev: KeyCode) {
+        if !state.ignore_space {
+            match ev {
+                KeyCode::Char(' ') => {
+                    self.show = !self.show;
+                }
+                _ => {}
             }
-            _ => {}
         }
     }
 

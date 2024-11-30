@@ -18,11 +18,6 @@ CREATE TABLE room (
     name VARCHAR
 );
 
-CREATE TABLE room_members (
-    room_id INTEGER REFERENCES room(id),
-    user_id INTEGER REFERENCES user(id)
-);
-
 CREATE TABLE room_message (
     id INTEGER PRIMARY KEY,
     room_id INTEGER REFERENCES room(id),

@@ -35,6 +35,7 @@ pub struct Room {
     pub name: String,
 }
 
+#[derive(Clone)]
 pub struct User {
     pub id: i64,
     pub pubkey: [u8; 33],
@@ -411,5 +412,65 @@ impl Database {
         });
 
         user
+    }
+
+    pub fn users_in_room(&self, room: &str) -> Result<HashMap<[u8; 33], User>> {
+        let db = self.db.clone();
+        let users = self.rt.block_on(async move {
+            let sql = r#"SELECT u.id, u.pubkey, u.name
+            FROM room_message rm, user u
+            WHERE 
+                rm.room_id = (SELECT id FROM room WHERE name = ?1)
+                AND rm.user_id = u.id
+            ORDER BY rm.id DESC
+            LIMIT 20
+            "#;
+            let db = db.lock().await;
+            let mut stmt = ex!(db.prepare_cached(sql), sqlite);
+            let it = ex!(
+                stmt.query_map((room,), |r| Ok(User {
+                    id: r.get(0)?,
+                    pubkey: r.get(1)?,
+                    name: r.get(2)?
+                })),
+                sqlite
+            );
+            let mut users = HashMap::new();
+            for n in it {
+                let u = ex!(n, sqlite);
+                users.insert(u.pubkey, u);
+            }
+
+            Ok(users)
+        });
+
+        users
+    }
+
+    pub fn last_20_lines(&self, room: &str) -> Result<Vec<([u8; 33], String)>> {
+        let db = self.db.clone();
+        let msgs: Result<Vec<([u8; 33], String)>> = self.rt.block_on(async move {
+            let sql = r#"
+            SELECT u.pubkey, rm.message 
+            FROM room_message rm, user u
+            WHERE 
+                rm.room_id = (SELECT r.id FROM room r WHERE r.name = ?1)
+                AND rm.user_id = u.id 
+            ORDER BY rm.id DESC LIMIT 20
+            "#;
+            let db = db.lock().await;
+            let mut stmt = ex!(db.prepare_cached(sql), sqlite);
+            let res = ex!(stmt.query_map((room,), |r| Ok((r.get(0)?, r.get(1)?))), sqlite);
+
+            let mut msgs = Vec::new();
+            for n in res {
+                msgs.push(ex!(n, sqlite));
+            }
+            msgs.reverse();
+
+            Ok(msgs)
+        });
+
+        msgs
     }
 }

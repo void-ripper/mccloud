@@ -35,6 +35,7 @@ pub struct State {
     pub db: Arc<Database>,
     pub rooms: Vec<Room>,
     pub quit: bool,
+    pub ignore_space: bool,
     pub user: Option<PrivateUser>,
     pub next: Option<Active>,
 }
@@ -119,6 +120,7 @@ fn main() {
             rooms: Vec::new(),
             db: db.clone(),
             quit: false,
+            ignore_space: false,
             user,
             next: None,
         },
