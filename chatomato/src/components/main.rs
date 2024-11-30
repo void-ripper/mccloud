@@ -197,6 +197,7 @@ impl Component for MainView {
                             self.room_name = state.rooms[self.selected_room].name.clone();
                             self.lines.clear();
                             self.user_cache = state.db.users_in_room(&self.room_name).unwrap();
+
                             match state.db.last_20_lines(&self.room_name) {
                                 Ok(lines) => {
                                     for line in lines {
@@ -228,6 +229,7 @@ impl Component for MainView {
                     KeyCode::Esc => {
                         self.input_buffer.clear();
                         self.focus = Focus::Rooms;
+                        state.ignore_space = false;
                     }
                     KeyCode::Enter => {
                         if let Some(puser) = &state.user {

@@ -51,7 +51,14 @@ pub enum Active {
     CreateUser(CreateUser),
 }
 
-impl Active {
+impl Component for Active {
+    fn on_update(&mut self, state: &mut State, update: &db::Update) {
+        match self {
+            Self::Main(main) => main.on_update(state, update),
+            _ => {}
+        }
+    }
+
     fn on_press(&mut self, state: &mut State, ev: KeyCode) {
         match self {
             Self::Main(main) => main.on_press(state, ev),
@@ -165,7 +172,9 @@ fn main() {
             app.active = next;
         }
 
-        while let Ok(update) = rx.try_recv() {}
+        while let Ok(update) = rx.try_recv() {
+            app.active.on_update(&mut app.state, &update);
+        }
     }
 
     ratatui::restore();
