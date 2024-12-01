@@ -7,7 +7,8 @@ use std::{
 
 use borsh::{BorshDeserialize, BorshSerialize};
 use k256::{
-    ecdsa::SigningKey,
+    ecdsa::signature::hazmat::{PrehashSigner, PrehashVerifier},
+    schnorr::{Signature, SigningKey, VerifyingKey},
     sha2::{Digest, Sha256},
     SecretKey,
 };
@@ -109,6 +110,17 @@ pub struct Block {
     pub sign: SignBytes,
 }
 
+impl Block {
+    pub fn verify(&self) -> Result<bool> {
+        let hash = hash_data(&self.parent, &self.author, &self.next_choice, &self.data);
+        let verifier = ex!(VerifyingKey::from_bytes(&self.author), encrypt);
+        let sign = ex!(Signature::try_from(&self.sign[..]), encrypt);
+        ex!(verifier.verify_prehash(&hash, &sign), encrypt);
+
+        Ok(true)
+    }
+}
+
 pub struct Blockchain {
     index_file: PathBuf,
     db_file: PathBuf,
@@ -118,6 +130,23 @@ pub struct Blockchain {
     next_author: Option<PubKeyBytes>,
     pub count: u64,
     block_pos: u64,
+}
+
+fn hash_data(last: &Option<HashBytes>, pubkey: &PubKeyBytes, next: &PubKeyBytes, data: &Vec<Vec<u8>>) -> Vec<u8> {
+    let mut hsh = Sha256::new();
+
+    if let Some(parent) = last {
+        hsh.update(parent);
+    }
+    hsh.update(pubkey);
+    hsh.update(next);
+    for d in data.iter() {
+        hsh.update(d);
+    }
+
+    let hash = hsh.finalize().to_vec();
+
+    hash
 }
 
 impl Blockchain {
@@ -179,23 +208,12 @@ impl Blockchain {
     pub fn create_block(&mut self, next: PubKeyBytes, pubkey: PubKeyBytes, secret: &SecretKey) -> Block {
         let data: Vec<Vec<u8>> = self.cache.drain().collect();
         let signer = SigningKey::from(secret);
-        let mut hsh = Sha256::new();
+        let hash = hash_data(&self.last, &pubkey, &next, &data);
 
-        if let Some(parent) = &self.last {
-            hsh.update(parent);
-        }
-        hsh.update(&pubkey);
-        hsh.update(&next);
-        for d in data.iter() {
-            hsh.update(d);
-        }
-
-        let hash = hsh.finalize().to_vec();
         let mut hshbytes = [0u8; 32];
         hshbytes.copy_from_slice(&hash);
-        let (sign, _) = signer.sign_prehash_recoverable(&hash).unwrap();
-        let mut signbytes = [0u8; 64];
-        signbytes.copy_from_slice(&sign.to_bytes());
+        let sign = signer.sign_prehash(&hash).unwrap();
+        let signbytes = sign.to_bytes();
 
         Block {
             parent: self.last.clone(),
@@ -223,6 +241,8 @@ impl Blockchain {
             }
         }
 
+        ex!(blk.verify(), source);
+
         if self.root.is_none() {
             self.root = Some(blk.hash);
         }
@@ -236,7 +256,7 @@ impl Blockchain {
         self.count += 1;
 
         let data = ex!(borsh::to_vec(&blk), io);
-        let data = ex!(zstd::stream::encode_all(data.as_slice(), 6), io);
+        let data = ex!(zstd::stream::encode_all(data.as_slice(), 13), io);
         let idx = IndexEntry {
             hash: blk.hash,
             pos: self.block_pos,

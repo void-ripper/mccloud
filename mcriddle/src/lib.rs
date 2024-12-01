@@ -14,10 +14,6 @@ use client::Client;
 pub use error::{Error, Result};
 use indexmap::{IndexMap, IndexSet};
 use k256::{
-    ecdsa::{
-        signature::{Signer, Verifier},
-        Signature, SigningKey, VerifyingKey,
-    },
     elliptic_curve::{rand_core::OsRng, sec1::ToEncodedPoint},
     SecretKey,
 };
@@ -126,21 +122,12 @@ impl Peer {
             let p1 = peer.clone();
             tokio::spawn(async move {
                 let mut interval = time::interval(p1.cfg.keep_alive);
-                let signer = SigningKey::from(&p1.prikey);
-                let sign: Signature = signer.sign(&p1.pubkey);
-                let mut sign_bytes = [0u8; 64];
-                sign_bytes.copy_from_slice(&sign.to_vec());
+                let msg = Message::keepalive(&p1.pubkey, &p1.prikey);
 
                 while !p1.to_shutdown.load(Ordering::SeqCst) {
                     interval.tick().await;
 
-                    if let Err(e) = p1
-                        .broadcast(Message::KeepAlive {
-                            pubkey: p1.pubkey,
-                            sign: sign_bytes,
-                        })
-                        .await
-                    {
+                    if let Err(e) = p1.broadcast(msg.clone()).await {
                         tracing::error!("{} {}", p1.pubhex, e);
                     }
 
@@ -349,31 +336,29 @@ impl Peer {
             Message::Greeting { .. } => {
                 tracing::error!("{} we should never get a second greeting", self.pubhex);
             }
-            Message::KeepAlive { pubkey, sign } => {
+            m @ Message::KeepAlive { pubkey, .. } => {
                 if pubkey == self.pubkey {
                     return Ok(());
                 }
-                let verifier = ex!(VerifyingKey::from_sec1_bytes(&pubkey), encrypt);
-                let signature = ex!(Signature::from_slice(&sign), encrypt);
-                ex!(verifier.verify(&pubkey, &signature), encrypt);
 
-                let previous = self.known.lock().await.insert(pubkey.clone(), SystemTime::now());
-                if let Some(old) = previous {
-                    // tracing::debug!("{} keep alive {}", self.pubhex, hex::encode(&pubkey));
-                    let elapsed = old.elapsed().unwrap_or(self.cfg.keep_alive);
-                    let delta = if elapsed >= self.cfg.keep_alive {
-                        0
-                    } else {
-                        (self.cfg.keep_alive - elapsed).as_millis()
-                    };
+                if ex!(m.verify(), source) {
+                    let previous = self.known.lock().await.insert(pubkey.clone(), SystemTime::now());
 
-                    if delta < 50 {
-                        let msg = Message::KeepAlive { pubkey, sign };
-                        ex!(self.broadcast_except(msg, &cl).await, source);
+                    if let Some(old) = previous {
+                        // tracing::debug!("{} keep alive {}", self.pubhex, hex::encode(&pubkey));
+                        let elapsed = old.elapsed().unwrap_or(self.cfg.keep_alive);
+                        let delta = if elapsed >= self.cfg.keep_alive {
+                            0
+                        } else {
+                            (self.cfg.keep_alive - elapsed).as_millis()
+                        };
+
+                        if delta < 50 {
+                            ex!(self.broadcast_except(m, &cl).await, source);
+                        }
+                    } else if previous.is_none() {
+                        ex!(self.broadcast_except(m, &cl).await, source);
                     }
-                } else if previous.is_none() {
-                    let msg = Message::KeepAlive { pubkey, sign };
-                    ex!(self.broadcast_except(msg, &cl).await, source);
                 }
             }
             Message::ShareData { data } => {
@@ -406,6 +391,11 @@ impl Peer {
             }
             Message::ShareBlock { block } => {
                 tracing::info!("{} share block {}", self.pubhex, hex::encode(&block.hash));
+                let last = self.blockchain.lock().await.last;
+                if last.map(|n| n == block.hash).unwrap_or(false) {
+                    // we get the same block again, just ignore it
+                    return Ok(());
+                }
 
                 if self.pubkey == block.next_choice {
                     tracing::info!("{} me is next xD", self.pubhex);
