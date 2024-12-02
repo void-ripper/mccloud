@@ -325,7 +325,10 @@ impl Peer {
                 .map(|(k, _v)| k.clone())
                 .unwrap()
         };
-        let blk = blkch.create_block(next_author, self.pubkey.clone(), &self.prikey);
+        let blk = ex!(
+            blkch.create_block(next_author, self.pubkey.clone(), &self.prikey),
+            source
+        );
         ex!(blkch.add_block(blk.clone()), source);
 
         Ok(blk)

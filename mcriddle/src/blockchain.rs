@@ -113,7 +113,7 @@ pub struct Block {
 impl Block {
     pub fn verify(&self) -> Result<bool> {
         let hash = hash_data(&self.parent, &self.author, &self.next_choice, &self.data);
-        let verifier = ex!(VerifyingKey::from_bytes(&self.author), encrypt);
+        let verifier = ex!(VerifyingKey::from_bytes(&self.author[1..]), encrypt);
         let sign = ex!(Signature::try_from(&self.sign[..]), encrypt);
         ex!(verifier.verify_prehash(&hash, &sign), encrypt);
 
@@ -205,24 +205,24 @@ impl Blockchain {
         BlockIterator::new(&self.index_file, &self.db_file, start)
     }
 
-    pub fn create_block(&mut self, next: PubKeyBytes, pubkey: PubKeyBytes, secret: &SecretKey) -> Block {
+    pub fn create_block(&mut self, next: PubKeyBytes, pubkey: PubKeyBytes, secret: &SecretKey) -> Result<Block> {
         let data: Vec<Vec<u8>> = self.cache.drain().collect();
         let signer = SigningKey::from(secret);
         let hash = hash_data(&self.last, &pubkey, &next, &data);
 
         let mut hshbytes = [0u8; 32];
         hshbytes.copy_from_slice(&hash);
-        let sign = signer.sign_prehash(&hash).unwrap();
+        let sign = ex!(signer.sign_prehash(&hash), encrypt);
         let signbytes = sign.to_bytes();
 
-        Block {
+        Ok(Block {
             parent: self.last.clone(),
             author: pubkey,
             next_choice: next,
             data,
             hash: hshbytes,
             sign: signbytes,
-        }
+        })
     }
 
     pub fn add_block(&mut self, blk: Block) -> Result<()> {

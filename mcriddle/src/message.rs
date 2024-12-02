@@ -55,7 +55,7 @@ impl Message {
     pub fn verify(&self) -> Result<bool> {
         match self {
             Self::KeepAlive { pubkey, sign } => {
-                let verifier = ex!(VerifyingKey::from_bytes(pubkey), encrypt);
+                let verifier = ex!(VerifyingKey::from_bytes(&pubkey[1..]), encrypt);
                 let signature = ex!(Signature::try_from(&sign[..]), encrypt);
                 ex!(verifier.verify(pubkey, &signature), encrypt);
 
