@@ -16,6 +16,5 @@ main.container
 </template>
 
 <style>
-@import "bulma/bulma.scss";
 
 </style>

@@ -7,5 +7,9 @@
     {
       "path": "./tsconfig.app.json"
     }
-  ]
+  ],
+  "compilationOptions": {
+    "target": "ESNext",
+    "types": ["vite/client"]
+  }
 }
