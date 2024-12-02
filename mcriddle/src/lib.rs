@@ -390,7 +390,9 @@ impl Peer {
                 tracing::info!("{} got block {}", self.pubhex, hex::encode(&block.hash));
 
                 ex!(self.blockchain.lock().await.add_block(block.clone()), source);
-                ex!(self.last_block_tx.send(block), sync);
+                if self.last_block_tx.receiver_count() > 0 {
+                    ex!(self.last_block_tx.send(block), sync);
+                }
             }
             Message::ShareBlock { block } => {
                 tracing::info!("{} share block {}", self.pubhex, hex::encode(&block.hash));
@@ -417,7 +419,9 @@ impl Peer {
                                         peer.broadcast(Message::ShareBlock { block: block.clone() }).await,
                                         source
                                     );
-                                    ex!(peer.last_block_tx.send(block), sync);
+                                    if peer.last_block_tx.receiver_count() > 0 {
+                                        ex!(peer.last_block_tx.send(block), sync);
+                                    }
                                     break;
                                 }
                             }
@@ -438,7 +442,9 @@ impl Peer {
                         .await,
                     source
                 );
-                ex!(self.last_block_tx.send(block), sync);
+                if self.last_block_tx.receiver_count() > 0 {
+                    ex!(self.last_block_tx.send(block), sync);
+                }
             }
         }
 
