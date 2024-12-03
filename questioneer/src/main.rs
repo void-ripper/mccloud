@@ -36,7 +36,7 @@ impl App {
     async fn spawn_peers(&mut self, thin: bool, count: u32) -> Vec<PeerData> {
         for _ in 0..count {
             let cfg = Config {
-                addr: format!("127.0.0.1:{}", self.port_pool),
+                addr: ([127, 0, 0, 1], self.port_pool).into(),
                 folder: PathBuf::from("data").join(self.port_pool.to_string()),
                 keep_alive: Duration::from_millis(250),
                 data_gather_time: Duration::from_millis(500),
@@ -121,7 +121,7 @@ pub struct ConnData {
 async fn peer_connect(state: AppPtr, Json(conn): Json<ConnData>) {
     let app = state.lock().await;
     if let Some((frm, to)) = app.peers.get(&conn.frm).zip(app.peers.get(&conn.to)) {
-        if let Err(e) = frm.connect(to.cfg.addr.parse().unwrap()).await {
+        if let Err(e) = frm.connect(to.cfg.addr).await {
             tracing::error!("{e}");
         }
     }
@@ -140,7 +140,7 @@ async fn peer_blocks(state: AppPtr, Path(pubhex): Path<String>) -> Json<Vec<Bloc
     if let Some(p) = app.peers.get(&pubhex) {
         for blk in p.block_iter().await {
             let b = blk.unwrap();
-            let data: Vec<String> = b.data.into_iter().map(|d| String::from_utf8(d).unwrap()).collect();
+            let data: Vec<String> = b.data.into_iter().map(|d| String::from_utf8(d.data).unwrap()).collect();
             blocks.push(BlockData {
                 hash: hex::encode(b.hash),
                 data,

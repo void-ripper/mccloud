@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::{net::SocketAddr, path::PathBuf};
 
 use serde::Deserialize;
 
@@ -6,7 +6,7 @@ use crate::error::{Error, Result};
 
 #[derive(Deserialize, Clone)]
 pub struct Config {
-    pub addr: String,
+    pub addr: SocketAddr,
     pub data: PathBuf,
     pub clients: Vec<String>,
 }
@@ -26,7 +26,7 @@ clients = []"#,
         )
         .map_err(|e| Error::io(line!(), module_path!(), e))?;
         Ok(Config {
-            addr: "0.0.0.0:29092".into(),
+            addr: "0.0.0.0:29092".parse().unwrap(),
             data: "data".into(),
             clients: Vec::new(),
         })

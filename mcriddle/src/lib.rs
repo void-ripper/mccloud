@@ -9,7 +9,7 @@ use std::{
     time::{Duration, SystemTime},
 };
 
-use blockchain::{Block, BlockIterator, Blockchain};
+use blockchain::{Block, BlockIterator, Blockchain, Data};
 use client::{ClientInfo, ClientWriter};
 pub use error::{Error, Result};
 use indexmap::{IndexMap, IndexSet};
@@ -297,7 +297,8 @@ impl Peer {
             if !self.cfg.thin && !thin && root.is_none() && blkch.root.is_none() {
                 if self.pubkey > pubkey {
                     tracing::info!("{} create genesis block", self.pubhex);
-                    blkch.cache.insert(b"[genesis]".to_vec());
+                    let data = ex!(Data::new(b"[genesis]".to_vec(), &self.pubkey, &self.prikey), source);
+                    blkch.cache.insert(data.sign, data);
                     let blk = ex!(self.create_next_block(&mut *blkch).await, source);
                     ex!(cl.write(&Message::ShareBlock { block: blk }).await, source);
                 }
@@ -434,11 +435,13 @@ impl Peer {
         Ok(())
     }
 
-    async fn on_share_data(&self, data: Vec<u8>, cl: Arc<ClientInfo>) -> Result<()> {
+    async fn on_share_data(&self, data: Data, cl: Arc<ClientInfo>) -> Result<()> {
         tracing::info!("{} got data", self.pubhex);
 
-        let unknown = self.blockchain.lock().await.cache.insert(data.clone());
-        if unknown {
+        let mut blkch = self.blockchain.lock().await;
+
+        if !blkch.cache.contains_key(&data.sign) {
+            blkch.cache.insert(data.sign, data.clone());
             let msg = Message::ShareData { data };
             ex!(self.broadcast_except(msg, &cl).await, source);
         }
@@ -605,8 +608,10 @@ impl Peer {
 
     /// Share data in the network.
     pub async fn share(&self, data: Vec<u8>) -> Result<()> {
-        let unknown = self.blockchain.lock().await.cache.insert(data.clone());
-        if unknown {
+        let data = ex!(Data::new(data, &self.pubkey, &self.prikey), source);
+        let mut blkch = self.blockchain.lock().await;
+        if !blkch.cache.contains_key(&data.sign) {
+            blkch.cache.insert(data.sign, data.clone());
             let msg = Message::ShareData { data };
             ex!(self.broadcast(msg).await, source);
         }

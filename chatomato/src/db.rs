@@ -140,10 +140,10 @@ impl Database {
         rt.spawn(async move {
             while let Ok(blk) = lbr.recv().await {
                 for data in blk.data {
-                    if data.as_slice() == b"[genesis]" {
+                    if data.data.as_slice() == b"[genesis]" {
                         continue;
                     }
-                    let e: Envelope = borsh::from_slice(&data).unwrap();
+                    let e: Envelope = borsh::from_slice(&data.data).unwrap();
                     let res = match e {
                         Envelope::Calledback { msg, cb } => match msg {
                             Message::CreateUser { pubkey, name } => {

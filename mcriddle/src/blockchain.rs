@@ -1,5 +1,5 @@
 use std::{
-    collections::HashSet,
+    collections::HashMap,
     fs::{File, OpenOptions},
     io::{BufReader, Read, Seek, SeekFrom, Write},
     path::PathBuf,
@@ -100,6 +100,38 @@ impl Iterator for BlockIterator {
     }
 }
 
+#[derive(BorshDeserialize, BorshSerialize, Clone)]
+pub struct Data {
+    pub data: Vec<u8>,
+    /// The node which created the data.
+    pub author: PubKeyBytes,
+    /// The signed
+    pub sign: SignBytes,
+}
+
+impl Data {
+    pub fn new(data: Vec<u8>, author: &PubKeyBytes, secret: &SecretKey) -> Result<Self> {
+        let signer = SigningKey::from(secret);
+        let mut sha = Sha256::new();
+
+        sha.update(author);
+        sha.update(&data);
+
+        let mut hshbytes = [0u8; 32];
+        let hash = sha.finalize();
+        hshbytes.copy_from_slice(&hash);
+
+        let sign = ex!(signer.sign_prehash(&hshbytes), encrypt);
+        let signbytes = sign.to_bytes();
+
+        Ok(Self {
+            data,
+            author: *author,
+            sign: signbytes,
+        })
+    }
+}
+
 /// A single block in the block chain.
 #[derive(BorshDeserialize, BorshSerialize, Clone)]
 pub struct Block {
@@ -108,7 +140,7 @@ pub struct Block {
     /// The hash of this block.
     pub hash: HashBytes,
     /// The data of this block.
-    pub data: Vec<Vec<u8>>,
+    pub data: Vec<Data>,
     /// The next block author.
     pub next_choice: PubKeyBytes,
     /// The current block author.
@@ -131,7 +163,7 @@ impl Block {
 pub struct Blockchain {
     index_file: PathBuf,
     db_file: PathBuf,
-    pub cache: HashSet<Vec<u8>>,
+    pub cache: HashMap<SignBytes, Data>,
     pub root: Option<HashBytes>,
     pub last: Option<HashBytes>,
     next_author: Option<PubKeyBytes>,
@@ -139,7 +171,7 @@ pub struct Blockchain {
     block_pos: u64,
 }
 
-fn hash_data(last: &Option<HashBytes>, pubkey: &PubKeyBytes, next: &PubKeyBytes, data: &Vec<Vec<u8>>) -> Vec<u8> {
+fn hash_data(last: &Option<HashBytes>, pubkey: &PubKeyBytes, next: &PubKeyBytes, data: &Vec<Data>) -> Vec<u8> {
     let mut hsh = Sha256::new();
 
     if let Some(parent) = last {
@@ -148,7 +180,9 @@ fn hash_data(last: &Option<HashBytes>, pubkey: &PubKeyBytes, next: &PubKeyBytes,
     hsh.update(pubkey);
     hsh.update(next);
     for d in data.iter() {
-        hsh.update(d);
+        hsh.update(&d.data);
+        hsh.update(&d.author);
+        hsh.update(&d.sign);
     }
 
     let hash = hsh.finalize().to_vec();
@@ -199,7 +233,7 @@ impl Blockchain {
         Ok(Self {
             index_file,
             db_file,
-            cache: HashSet::new(),
+            cache: HashMap::new(),
             root,
             last,
             next_author: next,
@@ -214,7 +248,7 @@ impl Blockchain {
 
     /// Creates a new block. The block is *not* added to the block chain.
     pub fn create_block(&mut self, next: PubKeyBytes, pubkey: PubKeyBytes, secret: &SecretKey) -> Result<Block> {
-        let data: Vec<Vec<u8>> = self.cache.drain().collect();
+        let data: Vec<Data> = self.cache.drain().map(|(_k, v)| v).collect();
         let signer = SigningKey::from(secret);
         let hash = hash_data(&self.last, &pubkey, &next, &data);
 
@@ -257,7 +291,7 @@ impl Blockchain {
         }
 
         for d in blk.data.iter() {
-            self.cache.remove(d);
+            self.cache.remove(&d.sign);
         }
 
         self.last = Some(blk.hash);

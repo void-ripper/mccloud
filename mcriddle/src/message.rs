@@ -10,7 +10,7 @@ use k256::{
 };
 
 use crate::{
-    blockchain::Block,
+    blockchain::{Block, Data},
     error::{Error, Result},
     ex, HashBytes, PubKeyBytes, SignBytes,
 };
@@ -30,7 +30,7 @@ pub enum Message {
         sign: SignBytes,
     },
     ShareData {
-        data: Vec<u8>,
+        data: Data,
     },
     RequestBlocks {
         start: Option<HashBytes>,
