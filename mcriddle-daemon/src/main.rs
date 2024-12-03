@@ -30,6 +30,8 @@ async fn main() {
         keep_alive: Duration::from_millis(250),
         data_gather_time: Duration::from_millis(500),
         thin: false,
+        relationship_time: Duration::from_millis(30_000),
+        relationship_count: 5,
     };
     let peer = mcriddle::Peer::new(cfg).unwrap();
 
