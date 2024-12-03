@@ -100,13 +100,20 @@ impl Iterator for BlockIterator {
     }
 }
 
+/// A single block in the block chain.
 #[derive(BorshDeserialize, BorshSerialize, Clone)]
 pub struct Block {
+    /// The block that comes before this one.
     pub parent: Option<HashBytes>,
+    /// The hash of this block.
     pub hash: HashBytes,
+    /// The data of this block.
     pub data: Vec<Vec<u8>>,
+    /// The next block author.
     pub next_choice: PubKeyBytes,
+    /// The current block author.
     pub author: PubKeyBytes,
+    /// The signature of the block data, created with the private key of the author.
     pub sign: SignBytes,
 }
 
@@ -205,6 +212,7 @@ impl Blockchain {
         BlockIterator::new(&self.index_file, &self.db_file, start)
     }
 
+    /// Creates a new block. The block is *not* added to the block chain.
     pub fn create_block(&mut self, next: PubKeyBytes, pubkey: PubKeyBytes, secret: &SecretKey) -> Result<Block> {
         let data: Vec<Vec<u8>> = self.cache.drain().collect();
         let signer = SigningKey::from(secret);
@@ -225,6 +233,7 @@ impl Blockchain {
         })
     }
 
+    /// Adds a new block to the block chain.
     pub fn add_block(&mut self, blk: Block) -> Result<()> {
         if self.last != blk.parent {
             return Err(Error::non_child_block(line!(), module_path!(), blk.hash));

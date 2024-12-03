@@ -43,12 +43,19 @@ pub type SignBytes = [u8; 64];
 
 #[derive(Clone)]
 pub struct Config {
-    pub addr: String,
+    /// The address the peer is listening on.
+    pub addr: SocketAddr,
+    /// The data folder where to save the blockchain.
     pub folder: PathBuf,
+    /// The time between keep alive updates.
     pub keep_alive: Duration,
+    /// How long to gather new data until new block is generated.
     pub data_gather_time: Duration,
+    /// A thin node does not participate in generating new blocks.
     pub thin: bool,
+    /// In which time intervals to look for new connections.
     pub relationship_time: Duration,
+    /// How many connections a node should have.
     pub relationship_count: u32,
 }
 
@@ -245,7 +252,7 @@ impl Peer {
             let blkch = self.blockchain.lock().await;
             Message::Greeting {
                 pubkey: self.pubkey.clone(),
-                listen: self.cfg.addr.parse().unwrap(),
+                listen: self.cfg.addr,
                 root: blkch.root.clone(),
                 last: blkch.last.clone(),
                 count: blkch.count,
@@ -573,25 +580,30 @@ impl Peer {
         Ok(())
     }
 
+    /// Returns the hex representation of the public key.
     pub fn pubhex(&self) -> String {
         self.pubhex.clone()
     }
 
+    /// Returns the public keys of the directly connected peers.
     pub async fn client_pubkeys(&self) -> HashSet<PubKeyBytes> {
         let cl = self.clients.lock().await;
         cl.keys().cloned().collect()
     }
 
+    /// Returns all known public keys.
     pub async fn known_pubkeys(&self) -> IndexSet<PubKeyBytes> {
         self.known.lock().await.keys().cloned().collect()
     }
 
+    /// Try to connect to another peer.
     pub async fn connect(&self, addr: SocketAddr) -> Result<()> {
         tracing::info!("{} connect to {}", self.pubhex, addr);
         ex!(self.to_accept.send(addr).await, sync);
         Ok(())
     }
 
+    /// Share data in the network.
     pub async fn share(&self, data: Vec<u8>) -> Result<()> {
         let unknown = self.blockchain.lock().await.cache.insert(data.clone());
         if unknown {
@@ -602,10 +614,12 @@ impl Peer {
         Ok(())
     }
 
+    /// Returns a new tokio::broadcast::Receiver which gets the new last block.
     pub fn last_block_receiver(&self) -> broadcast::Receiver<Block> {
         self.last_block_tx.subscribe()
     }
 
+    /// Returns an iterator over all blocks, from start to last.
     pub async fn block_iter(&self) -> BlockIterator {
         self.blockchain.lock().await.get_blocks(None)
     }
