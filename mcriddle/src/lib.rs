@@ -374,157 +374,199 @@ impl Peer {
                 tracing::error!("{} we should never get a second greeting", self.pubhex);
             }
             m @ Message::KeepAlive { pubkey, .. } => {
-                if pubkey == self.pubkey {
-                    return Ok(());
-                }
-
-                if ex!(m.verify(), source) {
-                    let previous = self.known.lock().await.insert(pubkey.clone(), SystemTime::now());
-
-                    if let Some(old) = previous {
-                        // tracing::debug!("{} keep alive {}", self.pubhex, hex::encode(&pubkey));
-                        let elapsed = old.elapsed().unwrap_or(self.cfg.keep_alive);
-                        let delta = if elapsed >= self.cfg.keep_alive {
-                            0
-                        } else {
-                            (self.cfg.keep_alive - elapsed).as_millis()
-                        };
-
-                        if delta < 50 {
-                            ex!(self.broadcast_except(m, &cl).await, source);
-                        }
-                    } else if previous.is_none() {
-                        ex!(self.broadcast_except(m, &cl).await, source);
-                    }
-                }
+                ex!(self.on_keepalive(pubkey, m, cl).await, source);
             }
             Message::ShareData { data } => {
-                tracing::info!("{} got data", self.pubhex);
-
-                let unknown = self.blockchain.lock().await.cache.insert(data.clone());
-                if unknown {
-                    let msg = Message::ShareData { data };
-                    ex!(self.broadcast_except(msg, &cl).await, source);
-                }
+                ex!(self.on_share_data(data, cl).await, source);
             }
             Message::RequestBlocks { start } => {
-                tracing::info!(
-                    "{} request for blocks {}",
-                    self.pubhex,
-                    start.map(|n| hex::encode(n)).unwrap_or(String::new())
-                );
-                let blk_it = self.blockchain.lock().await.get_blocks(start);
-                for block in blk_it {
-                    let block = ex!(block, source);
-                    ex!(cl.write(&Message::RequestedBlock { block }).await, source);
-                }
+                ex!(self.on_request_blocks(start, cl).await, source);
             }
             Message::RequestedBlock { block } => {
-                tracing::info!("{} got block {}", self.pubhex, hex::encode(&block.hash));
-
-                ex!(self.blockchain.lock().await.add_block(block.clone()), source);
-                if self.last_block_tx.receiver_count() > 0 {
-                    ex!(self.last_block_tx.send(block), sync);
-                }
+                ex!(self.on_requested_block(block).await, source);
             }
             Message::ShareBlock { block } => {
-                tracing::info!("{} share block {}", self.pubhex, hex::encode(&block.hash));
-                let last = self.blockchain.lock().await.last;
-                if last.map(|n| n == block.hash).unwrap_or(false) {
-                    // we get the same block again, just ignore it
-                    return Ok(());
-                }
-
-                if self.pubkey == block.next_choice {
-                    tracing::info!("{} me is next xD", self.pubhex);
-
-                    let peer = self.me.upgrade().unwrap();
-                    tokio::spawn(async move {
-                        let mut interval = time::interval(peer.cfg.data_gather_time);
-                        let res: Result<()> = async {
-                            loop {
-                                interval.tick().await;
-
-                                let mut blkch = peer.blockchain.lock().await;
-                                if blkch.cache.len() > 0 {
-                                    let block = ex!(peer.create_next_block(&mut *blkch).await, source);
-                                    ex!(
-                                        peer.broadcast(Message::ShareBlock { block: block.clone() }).await,
-                                        source
-                                    );
-                                    if peer.last_block_tx.receiver_count() > 0 {
-                                        ex!(peer.last_block_tx.send(block), sync);
-                                    }
-                                    break;
-                                }
-                            }
-
-                            Ok(())
-                        }
-                        .await;
-
-                        if let Err(e) = res {
-                            tracing::error!("{} {}", peer.pubhex, e);
-                        }
-                    });
-                }
-                ex!(self.blockchain.lock().await.add_block(block.clone()), source);
-
-                ex!(
-                    self.broadcast_except(Message::ShareBlock { block: block.clone() }, &cl)
-                        .await,
-                    source
-                );
-                if self.last_block_tx.receiver_count() > 0 {
-                    ex!(self.last_block_tx.send(block), sync);
-                }
+                ex!(self.on_share_block(block, cl).await, source);
             }
             Message::RequestNeighbours { count, exclude } => {
-                let cls = self.clients.lock().await;
-                let mut exclude: HashSet<PubKeyBytes> = exclude.into_iter().collect();
-                let mut to_share = Vec::new();
-
-                exclude.insert(cl.pubkey);
-
-                // let to_exclude: Vec<String> = exclude.iter().map(|x| hex::encode(x)).collect();
-                // let to_exclude = to_exclude.join("\n");
-                // tracing::info!(
-                //     "{} request for neighbours\nfrom: {}\n{}",
-                //     self.pubhex,
-                //     hex::encode(cl.pubkey),
-                //     to_exclude
-                // );
-
-                for (k, cl) in cls.iter() {
-                    if !exclude.contains(k) && to_share.len() < count as _ {
-                        let listen = cl.listen;
-                        to_share.push((k.clone(), listen));
-                    }
-                }
-
-                if to_share.len() > 0 {
-                    ex!(
-                        cl.write(&Message::IntroduceNeighbours { neighbours: to_share }).await,
-                        source
-                    );
-                }
+                ex!(self.on_request_neighbours(count, exclude, cl).await, source);
             }
             Message::IntroduceNeighbours { neighbours } => {
-                // let to_connect: Vec<String> = neighbours.iter().map(|x| hex::encode(x.0)).collect();
-                // let to_connect = to_connect.join("\n");
-                // tracing::info!(
-                //     "{} introduce new neighbours {}\n{}",
-                //     self.pubhex,
-                //     neighbours.len(),
-                //     to_connect
-                // );
-                let cnt = self.clients.lock().await.len();
-                if cnt < self.cfg.relationship_count as _ {
-                    let to_add = self.cfg.relationship_count as usize - cnt;
-                    for (_k, n) in neighbours.into_iter().take(to_add) {
-                        ex!(self.to_accept.send(n).await, sync);
-                    }
+                ex!(self.on_introduce_neighbours(neighbours).await, source);
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn on_keepalive(&self, pubkey: PubKeyBytes, m: Message, cl: Arc<ClientInfo>) -> Result<()> {
+        if pubkey == self.pubkey {
+            return Ok(());
+        }
+
+        if ex!(m.verify(), source) {
+            let previous = self.known.lock().await.insert(pubkey.clone(), SystemTime::now());
+
+            if let Some(old) = previous {
+                // tracing::debug!("{} keep alive {}", self.pubhex, hex::encode(&pubkey));
+                let elapsed = old.elapsed().unwrap_or(self.cfg.keep_alive);
+                let delta = if elapsed >= self.cfg.keep_alive {
+                    0
+                } else {
+                    (self.cfg.keep_alive - elapsed).as_millis()
+                };
+
+                if delta < 50 {
+                    ex!(self.broadcast_except(m, &cl).await, source);
                 }
+            } else if previous.is_none() {
+                ex!(self.broadcast_except(m, &cl).await, source);
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn on_share_data(&self, data: Vec<u8>, cl: Arc<ClientInfo>) -> Result<()> {
+        tracing::info!("{} got data", self.pubhex);
+
+        let unknown = self.blockchain.lock().await.cache.insert(data.clone());
+        if unknown {
+            let msg = Message::ShareData { data };
+            ex!(self.broadcast_except(msg, &cl).await, source);
+        }
+
+        Ok(())
+    }
+
+    async fn on_request_blocks(&self, start: Option<HashBytes>, cl: Arc<ClientInfo>) -> Result<()> {
+        tracing::info!(
+            "{} request for blocks {}",
+            self.pubhex,
+            start.map(|n| hex::encode(n)).unwrap_or(String::new())
+        );
+        let blk_it = self.blockchain.lock().await.get_blocks(start);
+        for block in blk_it {
+            let block = ex!(block, source);
+            ex!(cl.write(&Message::RequestedBlock { block }).await, source);
+        }
+
+        Ok(())
+    }
+
+    async fn on_requested_block(&self, block: Block) -> Result<()> {
+        tracing::info!("{} got block {}", self.pubhex, hex::encode(&block.hash));
+
+        ex!(self.blockchain.lock().await.add_block(block.clone()), source);
+        if self.last_block_tx.receiver_count() > 0 {
+            ex!(self.last_block_tx.send(block), sync);
+        }
+
+        Ok(())
+    }
+
+    async fn on_share_block(&self, block: Block, cl: Arc<ClientInfo>) -> Result<()> {
+        tracing::info!("{} share block {}", self.pubhex, hex::encode(&block.hash));
+        let last = self.blockchain.lock().await.last;
+        if last.map(|n| n == block.hash).unwrap_or(false) {
+            // we get the same block again, just ignore it
+            return Ok(());
+        }
+
+        if self.pubkey == block.next_choice {
+            tracing::info!("{} me is next xD", self.pubhex);
+
+            let peer = self.me.upgrade().unwrap();
+            tokio::spawn(async move {
+                let mut interval = time::interval(peer.cfg.data_gather_time);
+                let res: Result<()> = async {
+                    loop {
+                        interval.tick().await;
+
+                        let mut blkch = peer.blockchain.lock().await;
+                        if blkch.cache.len() > 0 {
+                            let block = ex!(peer.create_next_block(&mut *blkch).await, source);
+                            ex!(
+                                peer.broadcast(Message::ShareBlock { block: block.clone() }).await,
+                                source
+                            );
+                            if peer.last_block_tx.receiver_count() > 0 {
+                                ex!(peer.last_block_tx.send(block), sync);
+                            }
+                            break;
+                        }
+                    }
+
+                    Ok(())
+                }
+                .await;
+
+                if let Err(e) = res {
+                    tracing::error!("{} {}", peer.pubhex, e);
+                }
+            });
+        }
+        ex!(self.blockchain.lock().await.add_block(block.clone()), source);
+
+        ex!(
+            self.broadcast_except(Message::ShareBlock { block: block.clone() }, &cl)
+                .await,
+            source
+        );
+        if self.last_block_tx.receiver_count() > 0 {
+            ex!(self.last_block_tx.send(block), sync);
+        }
+
+        Ok(())
+    }
+
+    async fn on_request_neighbours(&self, count: u32, exclude: Vec<PubKeyBytes>, cl: Arc<ClientInfo>) -> Result<()> {
+        let cls = self.clients.lock().await;
+        let mut exclude: HashSet<PubKeyBytes> = exclude.into_iter().collect();
+        let mut to_share = Vec::new();
+
+        exclude.insert(cl.pubkey);
+
+        // let to_exclude: Vec<String> = exclude.iter().map(|x| hex::encode(x)).collect();
+        // let to_exclude = to_exclude.join("\n");
+        // tracing::info!(
+        //     "{} request for neighbours\nfrom: {}\n{}",
+        //     self.pubhex,
+        //     hex::encode(cl.pubkey),
+        //     to_exclude
+        // );
+
+        for (k, cl) in cls.iter() {
+            if !exclude.contains(k) && to_share.len() < count as _ {
+                let listen = cl.listen;
+                to_share.push((k.clone(), listen));
+            }
+        }
+
+        if to_share.len() > 0 {
+            ex!(
+                cl.write(&Message::IntroduceNeighbours { neighbours: to_share }).await,
+                source
+            );
+        }
+
+        Ok(())
+    }
+
+    async fn on_introduce_neighbours(&self, neighbours: Vec<(PubKeyBytes, SocketAddr)>) -> Result<()> {
+        // let to_connect: Vec<String> = neighbours.iter().map(|x| hex::encode(x.0)).collect();
+        // let to_connect = to_connect.join("\n");
+        // tracing::info!(
+        //     "{} introduce new neighbours {}\n{}",
+        //     self.pubhex,
+        //     neighbours.len(),
+        //     to_connect
+        // );
+        let cnt = self.clients.lock().await.len();
+        if cnt < self.cfg.relationship_count as _ {
+            let to_add = self.cfg.relationship_count as usize - cnt;
+            for (_k, n) in neighbours.into_iter().take(to_add) {
+                ex!(self.to_accept.send(n).await, sync);
             }
         }
 
