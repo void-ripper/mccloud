@@ -2,6 +2,7 @@
 name = "mcriddle"
 version.workspace = true
 edition.workspace = true
+authors.workspace = true
 
 [dependencies]
 aes = "0.8.4"

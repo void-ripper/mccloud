@@ -5,15 +5,16 @@ opt-level = 1
 [profile.release]
 strip = true
 lto = true
-opt-level = "z"
+opt-level = 3
 
 [profile.release.build-override]
 strip = true
-opt-level = "z"
+opt-level = 3
 
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
+authors = ["void-ripper"]
 
 [workspace]
 resolver = "2"

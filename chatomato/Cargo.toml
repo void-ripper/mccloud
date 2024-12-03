@@ -2,6 +2,7 @@
 name = "chatomato"
 version.workspace = true
 edition.workspace = true
+authors.workspace = true
 
 [dependencies]
 borsh = { version = "1.5.3", features = ["derive"] }
