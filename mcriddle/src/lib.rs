@@ -480,16 +480,23 @@ impl Peer {
                 }
             }
             Message::RequestNeighbours { count, exclude } => {
-                // let to_exclude: Vec<String> = exclude.iter().map(|x| hex::encode(x)).collect();
-                // let to_exclude = to_exclude.join("\n");
-                // tracing::info!("{} request for neighbours\n{}", self.pubhex, to_exclude);
-
                 let cls = self.clients.lock().await;
-                let exclude: HashSet<PubKeyBytes> = exclude.into_iter().collect();
+                let mut exclude: HashSet<PubKeyBytes> = exclude.into_iter().collect();
                 let mut to_share = Vec::new();
 
+                exclude.insert(cl.pubkey);
+
+                // let to_exclude: Vec<String> = exclude.iter().map(|x| hex::encode(x)).collect();
+                // let to_exclude = to_exclude.join("\n");
+                // tracing::info!(
+                //     "{} request for neighbours\nfrom: {}\n{}",
+                //     self.pubhex,
+                //     hex::encode(cl.pubkey),
+                //     to_exclude
+                // );
+
                 for (k, cl) in cls.iter() {
-                    if !exclude.contains(k) && *k != cl.pubkey && to_share.len() < count as _ {
+                    if !exclude.contains(k) && to_share.len() < count as _ {
                         let listen = cl.listen;
                         to_share.push((k.clone(), listen));
                     }
@@ -503,16 +510,20 @@ impl Peer {
                 }
             }
             Message::IntroduceNeighbours { neighbours } => {
-                let to_connect: Vec<String> = neighbours.iter().map(|x| hex::encode(x.0)).collect();
-                let to_connect = to_connect.join("\n");
-                tracing::info!(
-                    "{} introduce new neighbours {}\n{}",
-                    self.pubhex,
-                    neighbours.len(),
-                    to_connect
-                );
-                for (_k, n) in neighbours {
-                    ex!(self.to_accept.send(n).await, sync);
+                // let to_connect: Vec<String> = neighbours.iter().map(|x| hex::encode(x.0)).collect();
+                // let to_connect = to_connect.join("\n");
+                // tracing::info!(
+                //     "{} introduce new neighbours {}\n{}",
+                //     self.pubhex,
+                //     neighbours.len(),
+                //     to_connect
+                // );
+                let cnt = self.clients.lock().await.len();
+                if cnt < self.cfg.relationship_count as _ {
+                    let to_add = self.cfg.relationship_count as usize - cnt;
+                    for (_k, n) in neighbours.into_iter().take(to_add) {
+                        ex!(self.to_accept.send(n).await, sync);
+                    }
                 }
             }
         }

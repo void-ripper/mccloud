@@ -41,8 +41,8 @@ impl App {
                 keep_alive: Duration::from_millis(250),
                 data_gather_time: Duration::from_millis(500),
                 thin,
-                relationship_time: Duration::from_millis(2500),
-                relationship_count: 3,
+                relationship_time: Duration::from_millis(5000),
+                relationship_count: 2,
             };
             self.port_pool += 1;
 
