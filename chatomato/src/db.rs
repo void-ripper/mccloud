@@ -118,6 +118,8 @@ impl Database {
             keep_alive: Duration::from_millis(250),
             data_gather_time: Duration::from_millis(500),
             thin: true,
+            relationship_time: Duration::from_millis(1_000),
+            relationship_count: 3,
         };
         let p = ex!(
             rt.block_on(async {

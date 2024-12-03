@@ -1,4 +1,4 @@
-use std::fmt::Display;
+use std::{fmt::Display, sync::Arc};
 
 use crate::{HashBytes, PubKeyBytes};
 
@@ -16,7 +16,7 @@ pub enum ErrorKind {
 
 #[derive(Debug)]
 pub struct Error {
-    source: Option<Box<Error>>,
+    source: Option<Arc<Error>>,
     kind: ErrorKind,
     line: u32,
     module: String,
@@ -27,7 +27,7 @@ impl Error {
     pub fn source(line: u32, module: &str, e: Error) -> Self {
         Self {
             kind: e.kind,
-            source: Some(Box::new(e)),
+            source: Some(Arc::new(e)),
             line,
             module: module.into(),
             msg: None,

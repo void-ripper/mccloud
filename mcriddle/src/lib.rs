@@ -10,7 +10,7 @@ use std::{
 };
 
 use blockchain::{Block, BlockIterator, Blockchain};
-use client::Client;
+use client::{ClientInfo, ClientWriter};
 pub use error::{Error, Result};
 use indexmap::{IndexMap, IndexSet};
 use k256::{
@@ -48,9 +48,11 @@ pub struct Config {
     pub keep_alive: Duration,
     pub data_gather_time: Duration,
     pub thin: bool,
+    pub relationship_time: Duration,
+    pub relationship_count: u32,
 }
 
-type Clients = HashMap<PubKeyBytes, Arc<Mutex<Client>>>;
+type Clients = HashMap<PubKeyBytes, Arc<ClientInfo>>;
 
 pub struct Peer {
     me: Weak<Peer>,
@@ -58,8 +60,8 @@ pub struct Peer {
     prikey: SecretKey,
     pubkey: PubKeyBytes,
     pubhex: String,
+    to_accept: mpsc::Sender<SocketAddr>,
     last_block_tx: broadcast::Sender<Block>,
-    to_handle_tx: mpsc::Sender<(Message, Arc<Mutex<Client>>)>,
     to_shutdown: Arc<AtomicBool>,
     clients: Mutex<Clients>,
     known: Mutex<IndexMap<PubKeyBytes, SystemTime>>,
@@ -74,7 +76,6 @@ impl Peer {
         let to_shutdown = Arc::new(AtomicBool::new(false));
 
         let blockchain = ex!(Blockchain::new(&cfg.folder), source);
-        let (mtx, mrx) = mpsc::channel(10);
 
         let pubhex: String = hex::encode(&pubkey);
 
@@ -96,6 +97,8 @@ impl Peer {
                 .unwrap_or(String::new())
         );
         let (last_block_tx, _) = broadcast::channel(10);
+        let (to_accept_tx, to_accept_rx) = mpsc::channel(10);
+
         let peer = Arc::new_cyclic(|me| Self {
             // let peer = Arc::new(Self {
             me: me.clone(),
@@ -103,8 +106,8 @@ impl Peer {
             pubkey,
             pubhex,
             cfg,
+            to_accept: to_accept_tx,
             last_block_tx,
-            to_handle_tx: mtx,
             to_shutdown,
             clients: Mutex::new(HashMap::new()),
             known: Mutex::new(IndexMap::new()),
@@ -113,7 +116,7 @@ impl Peer {
 
         let p0 = peer.clone();
         tokio::spawn(async move {
-            if let Err(e) = p0.listen(mrx).await {
+            if let Err(e) = p0.listen(to_accept_rx).await {
                 tracing::error!("{} Loop: {e}", p0.pubhex);
             }
         });
@@ -140,16 +143,46 @@ impl Peer {
                     });
                 }
             });
+
+            let p2 = peer.clone();
+            tokio::spawn(async move {
+                if let Err(e) = p2.establish_relationship().await {
+                    tracing::error!("{} {}", p2.pubhex, e);
+                }
+            });
         }
 
         Ok(peer)
     }
 
-    async fn broadcast_except(&self, msg: Message, except: &Arc<Mutex<Client>>) -> Result<()> {
-        let except = except.lock().await.pubkey.clone();
+    async fn establish_relationship(&self) -> Result<()> {
+        let mut interval = time::interval(self.cfg.relationship_time);
+        while !self.to_shutdown.load(Ordering::SeqCst) {
+            interval.tick().await;
+            {
+                let current = self.clients.lock().await.len();
+
+                if current < self.cfg.relationship_count as _ {
+                    let keys: Vec<PubKeyBytes> = self.clients.lock().await.keys().cloned().collect();
+                    ex!(
+                        self.broadcast(Message::RequestNeighbours {
+                            count: self.cfg.relationship_count,
+                            exclude: keys,
+                        })
+                        .await,
+                        source
+                    );
+                }
+            };
+        }
+
+        Ok(())
+    }
+
+    async fn broadcast_except(&self, msg: Message, except: &Arc<ClientInfo>) -> Result<()> {
+        let except = except.pubkey;
         let cls = self.clients.lock().await;
         for to in cls.values() {
-            let mut to = to.lock().await;
             if to.pubkey != except {
                 ex!(to.write(&msg).await, source);
             }
@@ -161,33 +194,31 @@ impl Peer {
     async fn broadcast(&self, msg: Message) -> Result<()> {
         let cls = self.clients.lock().await;
         for to in cls.values() {
-            let mut to = to.lock().await;
             ex!(to.write(&msg).await, source);
         }
 
         Ok(())
     }
 
-    async fn listen(&self, mut to_handle: mpsc::Receiver<(Message, Arc<Mutex<Client>>)>) -> Result<()> {
+    async fn listen(&self, mut to_accept: mpsc::Receiver<SocketAddr>) -> Result<()> {
         tracing::info!("{} start", self.pubhex);
 
         let listener = ex!(TcpListener::bind(self.cfg.addr.clone()).await, io);
 
         while !self.to_shutdown.load(Ordering::SeqCst) {
             select! {
+                addr = to_accept.recv() => {
+                    if let Some(addr) = addr {
+                        let sck = ex!(TcpStream::connect(addr).await, io);
+                        ex!(self.accept(addr, sck).await, source);
+                    }
+                }
                 res = listener.accept() => {
                     match res {
                         Ok((sck, addr)) => {
-                            self.accept(addr, sck).await?;
+                            ex!(self.accept(addr, sck).await, source);
                         }
                         Err(e) => {
-                            tracing::error!("{} {}", self.pubhex, e);
-                        }
-                    }
-                }
-                msg = to_handle.recv() => {
-                    if let Some((msg, cl)) = msg {
-                        if let Err(e) = self.on_message(msg,cl ).await {
                             tracing::error!("{} {}", self.pubhex, e);
                         }
                     }
@@ -204,11 +235,9 @@ impl Peer {
         tracing::info!("{} accept {}", self.pubhex, addr);
 
         let (mut reader, writer) = sck.into_split();
-        let mut cl = Client {
-            addr,
-            sck: writer,
-            pubkey: [0u8; 33],
+        let mut clw = ClientWriter {
             shared: None,
+            sck: writer,
             tx_nonce: 0,
         };
 
@@ -216,6 +245,7 @@ impl Peer {
             let blkch = self.blockchain.lock().await;
             Message::Greeting {
                 pubkey: self.pubkey.clone(),
+                listen: self.cfg.addr.parse().unwrap(),
                 root: blkch.root.clone(),
                 last: blkch.last.clone(),
                 count: blkch.count,
@@ -223,12 +253,13 @@ impl Peer {
             }
         };
 
-        ex!(cl.write(&greeting).await, source);
+        ex!(clw.write(&greeting).await, source);
 
-        let (nonce, greeting) = ex!(Client::read(&mut reader, &cl.shared).await, source);
+        let (nonce, greeting) = ex!(ClientWriter::read(&mut reader, &None).await, source);
 
         if let Message::Greeting {
             pubkey,
+            listen,
             root,
             last: _,
             count,
@@ -242,8 +273,13 @@ impl Peer {
                 root.as_ref().map(|r| hex::encode(r)).unwrap_or("".into()),
                 count
             );
-            cl.pubkey = pubkey.clone();
-            cl.shared_secret(&self.prikey);
+            let shared = clw.shared_secret(&pubkey, &self.prikey);
+            let cl = ClientInfo {
+                addr,
+                listen,
+                pubkey,
+                writer: Mutex::new(clw),
+            };
 
             if !thin {
                 self.known.lock().await.insert(pubkey, SystemTime::now());
@@ -269,6 +305,40 @@ impl Peer {
                     source
                 );
             }
+
+            let pubkey = cl.pubkey;
+            let pubhex = self.pubhex.clone();
+            let cl = Arc::new(cl);
+
+            let cl0 = cl.clone();
+            self.clients.lock().await.insert(pubkey, cl0);
+
+            let peer = self.me.upgrade().unwrap();
+
+            tokio::spawn(async move {
+                let mut rx_nonce = nonce;
+                loop {
+                    let msg = ClientWriter::read(&mut reader, &shared).await;
+                    match msg {
+                        Ok((nonce, msg)) => {
+                            if nonce > rx_nonce {
+                                rx_nonce = nonce;
+                                if let Err(e) = peer.on_message(msg, cl.clone()).await {
+                                    tracing::error!("{} {}", pubhex, e);
+                                }
+                            } else {
+                                tracing::warn!("{} nonce to low, omit message", pubhex);
+                            }
+                        }
+                        Err(e) => {
+                            tracing::error!("{} {}", pubhex, e);
+                            break;
+                        }
+                    }
+                }
+
+                peer.clients.lock().await.remove(&pubkey);
+            });
         } else {
             return Err(Error::protocol(
                 line!(),
@@ -276,42 +346,6 @@ impl Peer {
                 "first message was not greeting",
             ));
         }
-
-        let pubkey = cl.pubkey;
-        let shared = cl.shared;
-        let pubhex = self.pubhex.clone();
-        let to_handle = self.to_handle_tx.clone();
-        let cl = Arc::new(Mutex::new(cl));
-
-        let cl0 = cl.clone();
-        self.clients.lock().await.insert(pubkey, cl0);
-
-        let peer = self.me.upgrade().unwrap();
-
-        tokio::spawn(async move {
-            let mut rx_nonce = nonce;
-            loop {
-                let msg = Client::read(&mut reader, &shared).await;
-                match msg {
-                    Ok((nonce, msg)) => {
-                        if nonce > rx_nonce {
-                            rx_nonce = nonce;
-                            if let Err(e) = to_handle.send((msg, cl.clone())).await {
-                                tracing::error!("{} {}", pubhex, e);
-                            }
-                        } else {
-                            tracing::warn!("{} nonce to low, omit message", pubhex);
-                        }
-                    }
-                    Err(e) => {
-                        tracing::error!("{} {}", pubhex, e);
-                        break;
-                    }
-                }
-            }
-
-            peer.clients.lock().await.remove(&pubkey);
-        });
 
         Ok(())
     }
@@ -334,7 +368,7 @@ impl Peer {
         Ok(blk)
     }
 
-    async fn on_message(&self, msg: Message, cl: Arc<Mutex<Client>>) -> Result<()> {
+    async fn on_message(&self, msg: Message, cl: Arc<ClientInfo>) -> Result<()> {
         match msg {
             Message::Greeting { .. } => {
                 tracing::error!("{} we should never get a second greeting", self.pubhex);
@@ -380,7 +414,6 @@ impl Peer {
                     start.map(|n| hex::encode(n)).unwrap_or(String::new())
                 );
                 let blk_it = self.blockchain.lock().await.get_blocks(start);
-                let mut cl = cl.lock().await;
                 for block in blk_it {
                     let block = ex!(block, source);
                     ex!(cl.write(&Message::RequestedBlock { block }).await, source);
@@ -446,6 +479,42 @@ impl Peer {
                     ex!(self.last_block_tx.send(block), sync);
                 }
             }
+            Message::RequestNeighbours { count, exclude } => {
+                // let to_exclude: Vec<String> = exclude.iter().map(|x| hex::encode(x)).collect();
+                // let to_exclude = to_exclude.join("\n");
+                // tracing::info!("{} request for neighbours\n{}", self.pubhex, to_exclude);
+
+                let cls = self.clients.lock().await;
+                let exclude: HashSet<PubKeyBytes> = exclude.into_iter().collect();
+                let mut to_share = Vec::new();
+
+                for (k, cl) in cls.iter() {
+                    if !exclude.contains(k) && *k != cl.pubkey && to_share.len() < count as _ {
+                        let listen = cl.listen;
+                        to_share.push((k.clone(), listen));
+                    }
+                }
+
+                if to_share.len() > 0 {
+                    ex!(
+                        cl.write(&Message::IntroduceNeighbours { neighbours: to_share }).await,
+                        source
+                    );
+                }
+            }
+            Message::IntroduceNeighbours { neighbours } => {
+                let to_connect: Vec<String> = neighbours.iter().map(|x| hex::encode(x.0)).collect();
+                let to_connect = to_connect.join("\n");
+                tracing::info!(
+                    "{} introduce new neighbours {}\n{}",
+                    self.pubhex,
+                    neighbours.len(),
+                    to_connect
+                );
+                for (_k, n) in neighbours {
+                    ex!(self.to_accept.send(n).await, sync);
+                }
+            }
         }
 
         Ok(())
@@ -466,9 +535,7 @@ impl Peer {
 
     pub async fn connect(&self, addr: SocketAddr) -> Result<()> {
         tracing::info!("{} connect to {}", self.pubhex, addr);
-        let sck = ex!(TcpStream::connect(addr).await, io);
-        self.accept(addr, sck).await?;
-
+        ex!(self.to_accept.send(addr).await, sync);
         Ok(())
     }
 

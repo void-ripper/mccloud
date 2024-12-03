@@ -1,4 +1,4 @@
-use std::{io::Read, net::SocketAddr};
+use std::net::SocketAddr;
 
 use aes::cipher::{block_padding::Pkcs7, BlockDecryptMut, BlockEncryptMut, KeyIvInit};
 use k256::{
@@ -10,6 +10,7 @@ use k256::{
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::tcp::{OwnedReadHalf, OwnedWriteHalf},
+    sync::Mutex,
 };
 
 use crate::{
@@ -22,23 +23,37 @@ use crate::{
 pub type AesCbcEnc = cbc::Encryptor<aes::Aes256>;
 pub type AesCbcDec = cbc::Decryptor<aes::Aes256>;
 
-pub struct Client {
-    pub(crate) addr: SocketAddr,
-    pub(crate) pubkey: PubKeyBytes,
-    pub(crate) sck: OwnedWriteHalf,
-    pub(crate) shared: Option<HashBytes>,
-    pub(crate) tx_nonce: u64,
+pub struct ClientWriter {
+    pub sck: OwnedWriteHalf,
+    pub shared: Option<HashBytes>,
+    pub tx_nonce: u64,
 }
 
-impl Client {
-    pub fn shared_secret(&mut self, private_key: &SecretKey) {
-        let pubkey = PublicKey::from_sec1_bytes(&self.pubkey).unwrap();
+pub struct ClientInfo {
+    pub addr: SocketAddr,
+    pub listen: SocketAddr,
+    pub pubkey: PubKeyBytes,
+    pub writer: Mutex<ClientWriter>,
+}
+
+impl ClientInfo {
+    pub async fn write(&self, msg: &Message) -> Result<()> {
+        let mut w = self.writer.lock().await;
+        w.write(msg).await
+    }
+}
+
+impl ClientWriter {
+    pub fn shared_secret(&mut self, pubkey: &PubKeyBytes, private_key: &SecretKey) -> Option<HashBytes> {
+        let pubkey = PublicKey::from_sec1_bytes(pubkey).unwrap();
         let mut shared = Sha256::new();
         shared.update(diffie_hellman(private_key.to_nonzero_scalar(), pubkey.as_affine()).raw_secret_bytes());
         let shared = shared.finalize().to_vec();
         let mut buf: [u8; 32] = [0u8; 32];
         buf.copy_from_slice(&shared);
         self.shared = Some(buf);
+
+        self.shared.clone()
     }
 
     pub async fn write(&mut self, msg: &Message) -> Result<()> {

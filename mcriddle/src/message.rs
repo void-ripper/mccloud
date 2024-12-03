@@ -1,3 +1,5 @@
+use std::net::SocketAddr;
+
 use borsh::{BorshDeserialize, BorshSerialize};
 use k256::{
     schnorr::{
@@ -17,6 +19,7 @@ use crate::{
 pub enum Message {
     Greeting {
         pubkey: PubKeyBytes,
+        listen: SocketAddr,
         root: Option<HashBytes>,
         last: Option<HashBytes>,
         count: u64,
@@ -37,6 +40,13 @@ pub enum Message {
     },
     ShareBlock {
         block: Block,
+    },
+    RequestNeighbours {
+        count: u32,
+        exclude: Vec<PubKeyBytes>,
+    },
+    IntroduceNeighbours {
+        neighbours: Vec<(PubKeyBytes, SocketAddr)>,
     },
 }
 
