@@ -297,7 +297,7 @@ impl Peer {
             if !self.cfg.thin && !thin && root.is_none() && blkch.root.is_none() {
                 if self.pubkey > pubkey {
                     tracing::info!("{} create genesis block", self.pubhex);
-                    let data = ex!(Data::new(b"[genesis]".to_vec(), &self.pubkey, &self.prikey), source);
+                    let data = ex!(Data::new(Vec::new(), &self.pubkey, &self.prikey), source);
                     blkch.cache.insert(data.sign, data);
                     let blk = ex!(self.create_next_block(&mut *blkch).await, source);
                     ex!(cl.write(&Message::ShareBlock { block: blk }).await, source);
