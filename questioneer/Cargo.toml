@@ -6,9 +6,9 @@ edition.workspace = true
 [dependencies]
 axum = "0.7.9"
 hex = "0.4.3"
-indexmap = "2.6.0"
+indexmap = "2.7.0"
 mcriddle = { path = "../mcriddle" }
 serde = { version = "1.0.215", features = ["derive"] }
-tokio = { version = "1.41.1", features = ["full"] }
-tracing = "0.1.40"
-tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
+tokio = { version = "1.42.0", features = ["full"] }
+tracing = "0.1.41"
+tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
