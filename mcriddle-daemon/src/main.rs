@@ -1,4 +1,4 @@
-use std::{path::PathBuf, time::Duration};
+use std::{net::SocketAddr, path::PathBuf, time::Duration};
 
 use clap::Parser;
 
@@ -25,7 +25,7 @@ async fn main() {
     tracing_subscriber::fmt().with_env_filter(&args.log).init();
 
     let cfg = mcriddle::Config {
-        addr: format!("{}:{}", args.host, args.port),
+        addr: SocketAddr::new(args.host.parse().unwrap(), args.port),
         folder: args.data,
         keep_alive: Duration::from_millis(250),
         data_gather_time: Duration::from_millis(500),
