@@ -157,7 +157,7 @@ async fn main() {
 
     let app = App {
         peers: IndexMap::new(),
-        port_pool: 29092,
+        port_pool: 29102,
     };
 
     let router = Router::new()
