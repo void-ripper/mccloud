@@ -217,13 +217,17 @@ impl Peer {
                 addr = to_accept.recv() => {
                     if let Some(addr) = addr {
                         let sck = ex!(TcpStream::connect(addr).await, io);
-                        ex!(self.accept(addr, sck).await, source);
+                        if let Err(e) = self.accept(addr, sck).await {
+                            tracing::error!("{} {}", self.pubhex, e);
+                        }
                     }
                 }
                 res = listener.accept() => {
                     match res {
                         Ok((sck, addr)) => {
-                            ex!(self.accept(addr, sck).await, source);
+                            if let Err(e) = self.accept(addr, sck).await {
+                                tracing::error!("{} {}", self.pubhex, e);
+                            }
                         }
                         Err(e) => {
                             tracing::error!("{} {}", self.pubhex, e);
