@@ -130,6 +130,20 @@ impl Data {
             sign: signbytes,
         })
     }
+
+    pub fn verify(&self) -> Result<()> {
+        let mut sha = Sha256::new();
+
+        sha.update(&self.author);
+        sha.update(&self.data);
+        let hash = sha.finalize();
+
+        let verifier = ex!(VerifyingKey::from_bytes(&self.author[1..]), encrypt);
+        let sign = ex!(Signature::try_from(&self.sign[..]), encrypt);
+        ex!(verifier.verify_prehash(&hash, &sign), encrypt);
+
+        Ok(())
+    }
 }
 
 /// A single block in the block chain.
