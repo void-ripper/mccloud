@@ -6,7 +6,7 @@ This a simple peer to peer blockchain network.
 + Does not waste your electricity, like other algorithms.
 + Secp256k1 for public and private keys for each node.
 + Nodes communicated via AES-256-CBC.
-+ Zstd compresses data blocks.
++ Zstd compressed data blocks.
 + Uses Borsh for serialization.
 
 ## Example
@@ -38,19 +38,15 @@ peer.share(b"some bytes to share").await?;
 
 ## Development Requirements
 
-Rust toolchain is needed and CMake and LLVM for compiling bundled C dependencies.
+Rust and Cargo is needed.
 
 ### Windows
 
 ```powershell
-winget install LLVM.LLVM
-winget install Kitware.CMake
 winget install Rustlang.Rustup
 ```
 
 ### Linux / Mac OS
 
-+ Rustup
-+ CMake
-+ LLVM
++ Rust + Cargo
 
