@@ -1,8 +1,0 @@
-[package]
-name = "keys"
-version.workspace = true
-edition.workspace = true
-
-[dependencies]
-hex = "0.4.3"
-k256 = "0.13.4"
