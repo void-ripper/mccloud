@@ -17,7 +17,7 @@ let cfg = Config {
   folder: PathBuf::from("data"),
   keep_alive: Duration::from_millis(250),
   data_gather_time: Duration::from_millis(500),
-  thin,
+  thin: false,
   relationship_time: Duration::from_millis(5000),
   relationship_count: 2,
 };
