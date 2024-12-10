@@ -8,6 +8,33 @@ This a simple peer to peer blockchain network.
 + Zstd compresses data blocks.
 + Uses Borsh for serialization.
 
+## Example
+
+```rust
+let cfg = Config {
+  addr: ([127, 0, 0, 1], 29092).into(),
+  folder: PathBuf::from("data"),
+  keep_alive: Duration::from_millis(250),
+  data_gather_time: Duration::from_millis(500),
+  thin,
+  relationship_time: Duration::from_millis(5000),
+  relationship_count: 2,
+};
+let peer = Peer::new(cfg)?;
+
+let mut receiver = peer.last_block_receiver()
+
+tokio::spawn(async move {
+  while let Some(block) = receiver.recv().await {
+    for data in block.data.iter() {
+      data.data; // do something with your data
+    }    
+  }
+});
+
+peer.share(b"some bytes to share").await?;
+```
+
 ## Development Requirements
 
 Rust toolchain is needed and CMake and LLVM for compiling bundled C dependencies.
