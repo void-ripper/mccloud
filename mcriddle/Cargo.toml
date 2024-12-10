@@ -3,6 +3,11 @@ name = "mcriddle"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
+description = "A library to work with the mcriddle network."
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
 
 [dependencies]
 aes = "0.8.4"

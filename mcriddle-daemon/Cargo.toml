@@ -3,6 +3,11 @@ name = "mcriddle-daemon"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
+description = "A relay node for the mcriddle network."
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
 
 [features]
 default = []

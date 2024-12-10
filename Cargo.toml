@@ -15,7 +15,14 @@ opt-level = 3
 version = "0.1.0"
 edition = "2021"
 authors = ["void-ripper"]
+license = "LGPL 3.0"
+repository = "https://github.com/void-ripper/mcriddle.git"
+homepage = "https://github.com/void-ripper/mcriddle.git"
+readme = "README.md"
+keywords = ["p2p", "peer-to-peer", "blockchain"]
+categories = ["concurrency", "network-programming"]
 
 [workspace]
 resolver = "2"
-members = ["chatomato", "mcriddle", "mcriddle-daemon", "questioneer"]
+members = ["mcriddle", "mcriddle-daemon"]
+exclude = ["chatomato", "questioneer"]

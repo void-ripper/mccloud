@@ -1,3 +1,5 @@
+#![doc = include_str!("../../README.md")]
+
 use std::{net::SocketAddr, path::PathBuf, time::Duration};
 
 use clap::Parser;
