@@ -4,9 +4,10 @@ use crate::{HashBytes, PubKeyBytes};
 
 pub type Result<T> = std::result::Result<T, Error>;
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum ErrorKind {
     Io,
+    Disconnect,
     Addr,
     Sync,
     Encryption,
@@ -16,11 +17,11 @@ pub enum ErrorKind {
 
 #[derive(Debug)]
 pub struct Error {
-    source: Option<Arc<Error>>,
-    kind: ErrorKind,
-    line: u32,
-    module: String,
-    msg: Option<String>,
+    pub source: Option<Arc<Error>>,
+    pub kind: ErrorKind,
+    pub line: u32,
+    pub module: String,
+    pub msg: Option<String>,
 }
 
 impl Error {
@@ -55,9 +56,13 @@ impl Error {
     }
 
     pub fn io(line: u32, module: &str, e: std::io::Error) -> Self {
+        let kind = match e.kind() {
+            std::io::ErrorKind::UnexpectedEof | std::io::ErrorKind::BrokenPipe => ErrorKind::Disconnect,
+            _ => ErrorKind::Io,
+        };
         Self {
             source: None,
-            kind: ErrorKind::Io,
+            kind,
             line,
             module: module.into(),
             msg: Some(e.to_string()),

@@ -13,6 +13,7 @@ use std::{
 
 use blockchain::{Block, BlockIterator, Blockchain, Data};
 use client::{ClientInfo, ClientWriter};
+use error::ErrorKind;
 pub use error::{Error, Result};
 use indexmap::{IndexMap, IndexSet};
 use k256::{
@@ -351,7 +352,9 @@ impl Peer {
                             }
                         }
                         Err(e) => {
-                            tracing::error!("{} {}", pubhex, e);
+                            if e.kind != ErrorKind::Disconnect {
+                                tracing::error!("{} {}", pubhex, e);
+                            }
                             break;
                         }
                     }
