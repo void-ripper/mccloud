@@ -73,6 +73,7 @@ pub struct Peer {
     clients: Mutex<Clients>,
     known: Mutex<IndexMap<PubKeyBytes, SystemTime>>,
     blockchain: Mutex<Blockchain>,
+    on_block_creation: Mutex<Option<Box<dyn FnMut(&mut HashMap<SignBytes, Data>) + Send>>>,
 }
 
 impl Peer {
@@ -119,6 +120,7 @@ impl Peer {
             clients: Mutex::new(HashMap::new()),
             known: Mutex::new(IndexMap::new()),
             blockchain: Mutex::new(blockchain),
+            on_block_creation: Mutex::new(None),
         });
 
         let p0 = peer.clone();
@@ -387,6 +389,10 @@ impl Peer {
     async fn create_next_block(&self, blkch: &mut Blockchain) -> Result<Block> {
         tracing::info!("{} create next block", self.pubhex);
 
+        if let Some(oncb) = &mut *self.on_block_creation.lock().await {
+            oncb(&mut blkch.cache);
+        }
+
         let next_author = {
             let k = self.known.lock().await;
             k.get_index(rand::random::<usize>() % k.len())
@@ -623,6 +629,13 @@ impl Peer {
     /// Returns all known public keys.
     pub async fn known_pubkeys(&self) -> IndexSet<PubKeyBytes> {
         self.known.lock().await.keys().cloned().collect()
+    }
+
+    /// Sets a callback that is only called on the peer which creates block.
+    ///
+    /// This is usefull if you want to validate the data or want to perform a truly atomic action in the network.
+    pub async fn set_on_block_creation_cb<F: FnMut(&mut HashMap<SignBytes, Data>) + Send + 'static>(&self, cb: F) {
+        *self.on_block_creation.lock().await = Some(Box::new(cb));
     }
 
     /// Try to connect to another peer.
