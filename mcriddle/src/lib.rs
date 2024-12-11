@@ -4,10 +4,7 @@ use std::{
     collections::{HashMap, HashSet},
     net::SocketAddr,
     path::PathBuf,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc, Weak,
-    },
+    sync::{Arc, Weak},
     time::{Duration, SystemTime},
 };
 
@@ -72,7 +69,7 @@ pub struct Peer {
     pubhex: String,
     to_accept: mpsc::Sender<SocketAddr>,
     last_block_tx: broadcast::Sender<Block>,
-    to_shutdown: Arc<AtomicBool>,
+    to_shutdown: broadcast::Sender<bool>,
     clients: Mutex<Clients>,
     known: Mutex<IndexMap<PubKeyBytes, SystemTime>>,
     blockchain: Mutex<Blockchain>,
@@ -83,7 +80,7 @@ impl Peer {
         let prikey = k256::SecretKey::random(&mut OsRng);
         let mut pubkey: PubKeyBytes = [0u8; 33];
         pubkey.copy_from_slice(prikey.public_key().to_encoded_point(true).as_bytes());
-        let to_shutdown = Arc::new(AtomicBool::new(false));
+        let (to_shutdown, mut rx_shutdown) = broadcast::channel(1);
 
         let blockchain = ex!(Blockchain::new(&cfg.folder), source);
 
@@ -137,20 +134,23 @@ impl Peer {
                 let mut interval = time::interval(p1.cfg.keep_alive);
                 let msg = Message::keepalive(&p1.pubkey, &p1.prikey);
 
-                while !p1.to_shutdown.load(Ordering::SeqCst) {
-                    interval.tick().await;
+                loop {
+                    select! {
+                        _ = rx_shutdown.recv() => { break; }
+                        _ = interval.tick() => {
+                            if let Err(e) = p1.broadcast(msg.clone()).await {
+                                tracing::error!("{} {}", p1.pubhex, e);
+                            }
 
-                    if let Err(e) = p1.broadcast(msg.clone()).await {
-                        tracing::error!("{} {}", p1.pubhex, e);
-                    }
-
-                    p1.known.lock().await.retain(|_k, v| {
-                        if let Ok(elapsed) = v.elapsed() {
-                            elapsed < p1.cfg.keep_alive
-                        } else {
-                            false
+                            p1.known.lock().await.retain(|_k, v| {
+                                if let Ok(elapsed) = v.elapsed() {
+                                    elapsed < p1.cfg.keep_alive
+                                } else {
+                                    false
+                                }
+                            });
                         }
-                    });
+                    }
                 }
             });
 
@@ -166,24 +166,28 @@ impl Peer {
     }
 
     async fn establish_relationship(&self) -> Result<()> {
+        let mut rx_shutdown = self.to_shutdown.subscribe();
         let mut interval = time::interval(self.cfg.relationship_time);
-        while !self.to_shutdown.load(Ordering::SeqCst) {
-            interval.tick().await;
-            {
-                let current = self.clients.lock().await.len();
 
-                if current < self.cfg.relationship_count as _ {
-                    let keys: Vec<PubKeyBytes> = self.clients.lock().await.keys().cloned().collect();
-                    ex!(
-                        self.broadcast(Message::RequestNeighbours {
-                            count: self.cfg.relationship_count,
-                            exclude: keys,
-                        })
-                        .await,
-                        source
-                    );
+        loop {
+            select! {
+                _ = rx_shutdown.recv() => { break; }
+                _ = interval.tick() => {
+                    let current = self.clients.lock().await.len();
+
+                    if current < self.cfg.relationship_count as _ {
+                        let keys: Vec<PubKeyBytes> = self.clients.lock().await.keys().cloned().collect();
+                        ex!(
+                            self.broadcast(Message::RequestNeighbours {
+                                count: self.cfg.relationship_count,
+                                exclude: keys,
+                            })
+                            .await,
+                            source
+                        );
+                    }
                 }
-            };
+            }
         }
 
         Ok(())
@@ -214,9 +218,11 @@ impl Peer {
         tracing::info!("{} start", self.pubhex);
 
         let listener = ex!(TcpListener::bind(self.cfg.addr.clone()).await, io);
+        let mut rx_shutdown = self.to_shutdown.subscribe();
 
-        while !self.to_shutdown.load(Ordering::SeqCst) {
+        loop {
             select! {
+                _ = rx_shutdown.recv() => { break; }
                 addr = to_accept.recv() => {
                     if let Some(addr) = addr {
                         match TcpStream::connect(addr).await {
@@ -335,27 +341,32 @@ impl Peer {
             self.clients.lock().await.insert(pubkey, cl0);
 
             let peer = self.me.upgrade().unwrap();
+            let mut rx_shutdown = self.to_shutdown.subscribe();
 
             tokio::spawn(async move {
                 let mut rx_nonce = nonce;
                 loop {
-                    let msg = ClientWriter::read(&mut reader, &shared).await;
-                    match msg {
-                        Ok((nonce, msg)) => {
-                            if nonce > rx_nonce {
-                                rx_nonce = nonce;
-                                if let Err(e) = peer.on_message(msg, cl.clone()).await {
-                                    tracing::error!("{} {}", pubhex, e);
+                    select! {
+                        _ = rx_shutdown.recv() => { break; }
+                        msg = ClientWriter::read(&mut reader, &shared) => {
+                            match msg {
+                                Ok((nonce, msg)) => {
+                                    if nonce > rx_nonce {
+                                        rx_nonce = nonce;
+                                        if let Err(e) = peer.on_message(msg, cl.clone()).await {
+                                            tracing::error!("{} {}", pubhex, e);
+                                        }
+                                    } else {
+                                        tracing::warn!("{} nonce to low, omit message", pubhex);
+                                    }
                                 }
-                            } else {
-                                tracing::warn!("{} nonce to low, omit message", pubhex);
+                                Err(e) => {
+                                    if e.kind != ErrorKind::Disconnect {
+                                        tracing::error!("{} {}", pubhex, e);
+                                    }
+                                    break;
+                                }
                             }
-                        }
-                        Err(e) => {
-                            if e.kind != ErrorKind::Disconnect {
-                                tracing::error!("{} {}", pubhex, e);
-                            }
-                            break;
                         }
                     }
                 }
@@ -644,7 +655,8 @@ impl Peer {
         self.blockchain.lock().await.get_blocks(None)
     }
 
-    pub fn shutdown(&self) {
-        self.to_shutdown.store(true, Ordering::SeqCst);
+    pub fn shutdown(&self) -> Result<()> {
+        ex!(self.to_shutdown.send(true), sync);
+        Ok(())
     }
 }
