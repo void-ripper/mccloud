@@ -27,9 +27,9 @@ use tokio::{
     time,
 };
 
-mod blockchain;
+pub mod blockchain;
 mod client;
-mod error;
+pub mod error;
 mod message;
 
 #[macro_export]
