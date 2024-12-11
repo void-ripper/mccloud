@@ -2,8 +2,10 @@
 
 use std::{
     collections::{HashMap, HashSet},
+    future::Future,
     net::SocketAddr,
     path::PathBuf,
+    pin::Pin,
     sync::{Arc, Weak},
     time::{Duration, SystemTime},
 };
@@ -60,6 +62,8 @@ pub struct Config {
 }
 
 type Clients = HashMap<PubKeyBytes, Arc<ClientInfo>>;
+type OnCreateCb =
+    dyn Fn(&mut HashMap<SignBytes, Data>) -> Pin<Box<dyn Future<Output = Result<()>> + Send>> + Send + 'static;
 
 pub struct Peer {
     me: Weak<Peer>,
@@ -73,7 +77,7 @@ pub struct Peer {
     clients: Mutex<Clients>,
     known: Mutex<IndexMap<PubKeyBytes, SystemTime>>,
     blockchain: Mutex<Blockchain>,
-    on_block_creation: Mutex<Option<Box<dyn FnMut(&mut HashMap<SignBytes, Data>) + Send>>>,
+    on_block_creation: Mutex<Option<Box<OnCreateCb>>>,
 }
 
 impl Peer {
@@ -390,7 +394,7 @@ impl Peer {
         tracing::info!("{} create next block", self.pubhex);
 
         if let Some(oncb) = &mut *self.on_block_creation.lock().await {
-            oncb(&mut blkch.cache);
+            ex!(oncb(&mut blkch.cache).await, source);
         }
 
         let next_author = {
@@ -634,7 +638,10 @@ impl Peer {
     /// Sets a callback that is only called on the peer which creates block.
     ///
     /// This is usefull if you want to validate the data or want to perform a truly atomic action in the network.
-    pub async fn set_on_block_creation_cb<F: FnMut(&mut HashMap<SignBytes, Data>) + Send + 'static>(&self, cb: F) {
+    pub async fn set_on_block_creation_cb<F>(&self, cb: F)
+    where
+        F: Fn(&mut HashMap<SignBytes, Data>) -> Pin<Box<dyn Future<Output = Result<()>> + Send>> + Send + 'static,
+    {
         *self.on_block_creation.lock().await = Some(Box::new(cb));
     }
 
