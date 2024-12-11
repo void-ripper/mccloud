@@ -63,7 +63,9 @@ impl App {
 
     fn delete_peer(&mut self, pubkey: &str) {
         if let Some(v) = self.peers.swap_remove(pubkey) {
-            v.shutdown();
+            if let Err(e) = v.shutdown() {
+                tracing::error!("{e}");
+            }
         }
     }
 }

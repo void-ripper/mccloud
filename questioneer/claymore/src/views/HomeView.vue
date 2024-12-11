@@ -2,10 +2,10 @@
 
 Modal(title="Connect To" :show="showConnect" @close="showConnect = false" @ok="performConnect")
     .columns.is-centered
-        .column.is-half
-            .select.is-multiple
+        .column.is-three-quarters
+            .select.is-multiple.is-fullwidth
                 select(multiple size="8" v-model="toConnect").mono
-                    option(v-for="peer in connectables" :value="peer.id") {{ peer.id.substring(0, 12) }}
+                    option(v-for="peer in connectables" :value="peer.id") {{ peer.id }}
 
 
 .columns.is-centered.mt-5
