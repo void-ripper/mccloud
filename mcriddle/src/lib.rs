@@ -222,7 +222,7 @@ impl Peer {
     }
 
     async fn listen(&self, mut to_accept: mpsc::Receiver<SocketAddr>) -> Result<()> {
-        tracing::info!("{} start", self.pubhex);
+        tracing::info!("{} listen on {}", self.pubhex, self.cfg.addr);
 
         let listener = ex!(TcpListener::bind(self.cfg.addr.clone()).await, io);
         let mut rx_shutdown = self.to_shutdown.subscribe();
@@ -396,7 +396,7 @@ impl Peer {
 
         if let Some(oncb) = &mut *self.on_block_creation.lock().await {
             let cache = blkch.cache.drain().collect();
-            ex!(oncb(cache).await, source);
+            blkch.cache = ex!(oncb(cache).await, source);
         }
 
         let next_author = {
