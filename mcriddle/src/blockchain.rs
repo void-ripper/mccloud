@@ -313,7 +313,7 @@ impl Blockchain {
         self.count += 1;
 
         let data = ex!(borsh::to_vec(&blk), io);
-        let data = ex!(zstd::stream::encode_all(data.as_slice(), 13), io);
+        let data = ex!(zstd::stream::encode_all(data.as_slice(), 19), io);
         let idx = IndexEntry {
             hash: blk.hash,
             pos: self.block_pos,
