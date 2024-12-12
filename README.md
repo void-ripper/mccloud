@@ -12,6 +12,8 @@ This a simple peer to peer blockchain network.
 ## Example
 
 ```rust
+use mcriddle::{Config, Peer, SignBytes, blockchain::Data};
+
 let cfg = Config {
   addr: ([127, 0, 0, 1], 29092).into(),
   folder: PathBuf::from("data"),
@@ -22,6 +24,11 @@ let cfg = Config {
   relationship_count: 2,
 };
 let peer = Peer::new(cfg)?;
+
+peer.set_on_block_creation_cb(|data: &mut HashMap<SignBytes, Data>| Box::pin(async {
+  // validate data and/or perform a network atomic action
+  Ok(())
+})).await;
 
 let mut receiver = peer.last_block_receiver()
 

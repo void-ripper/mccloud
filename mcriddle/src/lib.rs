@@ -62,8 +62,9 @@ pub struct Config {
 }
 
 type Clients = HashMap<PubKeyBytes, Arc<ClientInfo>>;
-type OnCreateCb =
-    dyn Fn(&mut HashMap<SignBytes, Data>) -> Pin<Box<dyn Future<Output = Result<()>> + Send>> + Send + 'static;
+type OnCreateCb = dyn Fn(HashMap<SignBytes, Data>) -> Pin<Box<dyn Future<Output = Result<HashMap<SignBytes, Data>>> + Send>>
+    + Send
+    + 'static;
 
 pub struct Peer {
     me: Weak<Peer>,
@@ -394,7 +395,8 @@ impl Peer {
         tracing::info!("{} create next block", self.pubhex);
 
         if let Some(oncb) = &mut *self.on_block_creation.lock().await {
-            ex!(oncb(&mut blkch.cache).await, source);
+            let cache = blkch.cache.drain().collect();
+            ex!(oncb(cache).await, source);
         }
 
         let next_author = {
@@ -640,7 +642,9 @@ impl Peer {
     /// This is usefull if you want to validate the data or want to perform a truly atomic action in the network.
     pub async fn set_on_block_creation_cb<F>(&self, cb: F)
     where
-        F: Fn(&mut HashMap<SignBytes, Data>) -> Pin<Box<dyn Future<Output = Result<()>> + Send>> + Send + 'static,
+        F: Fn(HashMap<SignBytes, Data>) -> Pin<Box<dyn Future<Output = Result<HashMap<SignBytes, Data>>> + Send>>
+            + Send
+            + 'static,
     {
         *self.on_block_creation.lock().await = Some(Box::new(cb));
     }
@@ -650,6 +654,11 @@ impl Peer {
         tracing::info!("{} connect to {}", self.pubhex, addr);
         ex!(self.to_accept.send(addr).await, sync);
         Ok(())
+    }
+
+    pub fn create_data(&self, data: Vec<u8>) -> Result<Data> {
+        let data = ex!(Data::new(data, &self.pubkey, &self.prikey), source);
+        Ok(data)
     }
 
     /// Share data in the network.

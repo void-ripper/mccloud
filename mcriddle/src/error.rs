@@ -13,6 +13,7 @@ pub enum ErrorKind {
     Encryption,
     Blockchain,
     Protocol,
+    Extern,
 }
 
 #[derive(Debug)]
@@ -120,6 +121,16 @@ impl Error {
                 hex::encode(hsh),
                 hex::encode(author)
             )),
+        }
+    }
+
+    pub fn external(line: u32, module: &str, msg: String) -> Self {
+        Self {
+            source: None,
+            kind: ErrorKind::Extern,
+            line,
+            module: module.into(),
+            msg: Some(msg),
         }
     }
 }
