@@ -1,7 +1,7 @@
 #![doc = include_str!("../../README.md")]
 
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{hash_map::Entry, HashMap, HashSet},
     future::Future,
     net::SocketAddr,
     path::PathBuf,
@@ -90,24 +90,16 @@ impl Peer {
 
         let blockchain = ex!(Blockchain::new(&cfg.folder), source);
 
-        let pubhex: String = hex::encode(&pubkey);
+        let pubhex: String = hex::encode(pubkey);
 
         tracing::info!(
             "root block {}",
-            blockchain
-                .root
-                .as_ref()
-                .map(|r| hex::encode(r))
-                .unwrap_or(String::new())
+            blockchain.root.as_ref().map(hex::encode).unwrap_or_default()
         );
         tracing::info!(
             "last block {} {}",
             blockchain.count,
-            blockchain
-                .last
-                .as_ref()
-                .map(|r| hex::encode(r))
-                .unwrap_or(String::new())
+            blockchain.last.as_ref().map(hex::encode).unwrap_or_default()
         );
         let (last_block_tx, _) = broadcast::channel(10);
         let (to_accept_tx, to_accept_rx) = mpsc::channel(10);
@@ -224,7 +216,7 @@ impl Peer {
     async fn listen(&self, mut to_accept: mpsc::Receiver<SocketAddr>) -> Result<()> {
         tracing::info!("{} listen on {}", self.pubhex, self.cfg.addr);
 
-        let listener = ex!(TcpListener::bind(self.cfg.addr.clone()).await, io);
+        let listener = ex!(TcpListener::bind(self.cfg.addr).await, io);
         let mut rx_shutdown = self.to_shutdown.subscribe();
 
         loop {
@@ -277,10 +269,10 @@ impl Peer {
         let greeting = {
             let blkch = self.blockchain.lock().await;
             Message::Greeting {
-                pubkey: self.pubkey.clone(),
+                pubkey: self.pubkey,
                 listen: self.cfg.addr,
-                root: blkch.root.clone(),
-                last: blkch.last.clone(),
+                root: blkch.root,
+                last: blkch.last,
                 count: blkch.count,
                 thin: self.cfg.thin,
             }
@@ -302,8 +294,8 @@ impl Peer {
             tracing::info!(
                 "{} greeting {} {} {}",
                 self.pubhex,
-                hex::encode(&pubkey),
-                root.as_ref().map(|r| hex::encode(r)).unwrap_or("".into()),
+                hex::encode(pubkey),
+                root.as_ref().map(hex::encode).unwrap_or("".into()),
                 count
             );
             let shared = clw.shared_secret(&pubkey, &self.prikey);
@@ -325,19 +317,13 @@ impl Peer {
                     tracing::info!("{} create genesis block", self.pubhex);
                     let data = ex!(Data::new(Vec::new(), &self.pubkey, &self.prikey), source);
                     blkch.cache.insert(data.sign, data);
-                    let blk = ex!(self.create_next_block(&mut *blkch).await, source);
+                    let blk = ex!(self.create_next_block(&mut blkch).await, source);
                     ex!(cl.write(&Message::ShareBlock { block: blk }).await, source);
                 }
             } else if blkch.root.is_none() {
                 ex!(cl.write(&Message::RequestBlocks { start: None }).await, source);
             } else if count > blkch.count {
-                ex!(
-                    cl.write(&Message::RequestBlocks {
-                        start: blkch.last.clone()
-                    })
-                    .await,
-                    source
-                );
+                ex!(cl.write(&Message::RequestBlocks { start: blkch.last }).await, source);
             }
 
             let pubkey = cl.pubkey;
@@ -402,13 +388,10 @@ impl Peer {
         let next_author = {
             let k = self.known.lock().await;
             k.get_index(rand::random::<usize>() % k.len())
-                .map(|(k, _v)| k.clone())
+                .map(|(k, _v)| *k)
                 .unwrap()
         };
-        let blk = ex!(
-            blkch.create_block(next_author, self.pubkey.clone(), &self.prikey),
-            source
-        );
+        let blk = ex!(blkch.create_block(next_author, self.pubkey, &self.prikey), source);
         ex!(blkch.add_block(blk.clone()), source);
 
         Ok(blk)
@@ -451,7 +434,7 @@ impl Peer {
         }
 
         if ex!(m.verify(), source) {
-            let previous = self.known.lock().await.insert(pubkey.clone(), SystemTime::now());
+            let previous = self.known.lock().await.insert(pubkey, SystemTime::now());
 
             if let Some(old) = previous {
                 // tracing::debug!("{} keep alive {}", self.pubhex, hex::encode(&pubkey));
@@ -478,8 +461,8 @@ impl Peer {
 
         let mut blkch = self.blockchain.lock().await;
 
-        if !blkch.cache.contains_key(&data.sign) {
-            blkch.cache.insert(data.sign, data.clone());
+        if let Entry::Vacant(e) = blkch.cache.entry(data.sign) {
+            e.insert(data.clone());
             let msg = Message::ShareData { data };
             ex!(self.broadcast_except(msg, &cl).await, source);
         }
@@ -491,7 +474,7 @@ impl Peer {
         tracing::info!(
             "{} request for blocks {}",
             self.pubhex,
-            start.map(|n| hex::encode(n)).unwrap_or(String::new())
+            start.map(hex::encode).unwrap_or_default()
         );
         let blk_it = self.blockchain.lock().await.get_blocks(start);
         for block in blk_it {
@@ -503,7 +486,7 @@ impl Peer {
     }
 
     async fn on_requested_block(&self, block: Block) -> Result<()> {
-        tracing::info!("{} got block {}", self.pubhex, hex::encode(&block.hash));
+        tracing::info!("{} got block {}", self.pubhex, hex::encode(block.hash));
 
         ex!(self.blockchain.lock().await.add_block(block.clone()), source);
         if self.last_block_tx.receiver_count() > 0 {
@@ -514,7 +497,7 @@ impl Peer {
     }
 
     async fn on_share_block(&self, block: Block, cl: Arc<ClientInfo>) -> Result<()> {
-        tracing::info!("{} share block {}", self.pubhex, hex::encode(&block.hash));
+        tracing::info!("{} share block {}", self.pubhex, hex::encode(block.hash));
         let last = self.blockchain.lock().await.last;
         if last.map(|n| n == block.hash).unwrap_or(false) {
             // we get the same block again, just ignore it
@@ -532,8 +515,8 @@ impl Peer {
                         interval.tick().await;
 
                         let mut blkch = peer.blockchain.lock().await;
-                        if blkch.cache.len() > 0 {
-                            let block = ex!(peer.create_next_block(&mut *blkch).await, source);
+                        if !blkch.cache.is_empty() {
+                            let block = ex!(peer.create_next_block(&mut blkch).await, source);
                             ex!(
                                 peer.broadcast(Message::ShareBlock { block: block.clone() }).await,
                                 source
@@ -587,11 +570,11 @@ impl Peer {
         for (k, cl) in cls.iter() {
             if !exclude.contains(k) && to_share.len() < count as _ {
                 let listen = cl.listen;
-                to_share.push((k.clone(), listen));
+                to_share.push((*k, listen));
             }
         }
 
-        if to_share.len() > 0 {
+        if !to_share.is_empty() {
             ex!(
                 cl.write(&Message::IntroduceNeighbours { neighbours: to_share }).await,
                 source
@@ -665,8 +648,8 @@ impl Peer {
     pub async fn share(&self, data: Vec<u8>) -> Result<()> {
         let data = ex!(Data::new(data, &self.pubkey, &self.prikey), source);
         let mut blkch = self.blockchain.lock().await;
-        if !blkch.cache.contains_key(&data.sign) {
-            blkch.cache.insert(data.sign, data.clone());
+        if let Entry::Vacant(e) = blkch.cache.entry(data.sign) {
+            e.insert(data.clone());
             let msg = Message::ShareData { data };
             ex!(self.broadcast(msg).await, source);
         }

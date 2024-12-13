@@ -31,7 +31,7 @@ pub struct IndexIterator {
 
 impl IndexIterator {
     pub fn new(file: &PathBuf) -> Self {
-        let file = File::open(&file).unwrap();
+        let file = File::open(file).unwrap();
         let file = BufReader::new(file);
         Self { file }
     }
@@ -58,7 +58,7 @@ impl BlockIterator {
         let mut index_it = IndexIterator::new(index);
 
         if let Some(start) = start {
-            while let Some(i) = index_it.next() {
+            for i in index_it.by_ref() {
                 if i.hash == start {
                     break;
                 }
@@ -134,7 +134,7 @@ impl Data {
     pub fn verify(&self) -> Result<()> {
         let mut sha = Sha256::new();
 
-        sha.update(&self.author);
+        sha.update(self.author);
         sha.update(&self.data);
         let hash = sha.finalize();
 
@@ -185,7 +185,7 @@ pub struct Blockchain {
     block_pos: u64,
 }
 
-fn hash_data(last: &Option<HashBytes>, pubkey: &PubKeyBytes, next: &PubKeyBytes, data: &Vec<Data>) -> Vec<u8> {
+fn hash_data(last: &Option<HashBytes>, pubkey: &PubKeyBytes, next: &PubKeyBytes, data: &[Data]) -> Vec<u8> {
     let mut hsh = Sha256::new();
 
     if let Some(parent) = last {
@@ -195,19 +195,17 @@ fn hash_data(last: &Option<HashBytes>, pubkey: &PubKeyBytes, next: &PubKeyBytes,
     hsh.update(next);
     for d in data.iter() {
         hsh.update(&d.data);
-        hsh.update(&d.author);
-        hsh.update(&d.sign);
+        hsh.update(d.author);
+        hsh.update(d.sign);
     }
 
-    let hash = hsh.finalize().to_vec();
-
-    hash
+    hsh.finalize().to_vec()
 }
 
 impl Blockchain {
     pub fn new(folder: &PathBuf) -> Result<Self> {
         if !folder.exists() {
-            ex!(std::fs::create_dir_all(&folder), io);
+            ex!(std::fs::create_dir_all(folder), io);
         }
 
         let index_file = folder.join("index.db");
@@ -220,7 +218,7 @@ impl Blockchain {
             let root = last.as_ref().map(|n| n.hash);
             let mut cnt = if root.is_some() { 1 } else { 0 };
 
-            while let Some(idx) = it.next() {
+            for idx in it {
                 last = Some(idx);
                 cnt += 1;
             }
@@ -239,8 +237,22 @@ impl Blockchain {
             };
             (root, last, block_pos, cnt, next)
         } else {
-            ex!(OpenOptions::new().create(true).write(true).open(&index_file), io);
-            ex!(OpenOptions::new().create(true).write(true).open(&db_file), io);
+            ex!(
+                OpenOptions::new()
+                    .create(true)
+                    .truncate(false)
+                    .write(true)
+                    .open(&index_file),
+                io
+            );
+            ex!(
+                OpenOptions::new()
+                    .create(true)
+                    .truncate(false)
+                    .write(true)
+                    .open(&db_file),
+                io
+            );
             (None, None, 0, 0, None)
         };
 
@@ -272,7 +284,7 @@ impl Blockchain {
         let signbytes = sign.to_bytes();
 
         Ok(Block {
-            parent: self.last.clone(),
+            parent: self.last,
             author: pubkey,
             next_choice: next,
             data,
