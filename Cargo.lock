@@ -538,7 +538,7 @@ dependencies = [
 
 [[package]]
 name = "mcriddle"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "aes",
  "borsh",
@@ -554,7 +554,7 @@ dependencies = [
 
 [[package]]
 name = "mcriddle-daemon"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "clap",
  "mcriddle",
