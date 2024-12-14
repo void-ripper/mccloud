@@ -22,12 +22,13 @@ let cfg = Config {
   thin: false,
   relationship_time: Duration::from_millis(5000),
   relationship_count: 2,
+  next_candidates: 3,
 };
 let peer = Peer::new(cfg)?;
 
-peer.set_on_block_creation_cb(|data: &mut HashMap<SignBytes, Data>| Box::pin(async {
-  // validate data and/or perform a network atomic action
-  Ok(())
+peer.set_on_block_creation_cb(|data: HashMap<SignBytes, Data>| Box::pin(async {
+  // validate data and/or perform a network atomic actions
+  Ok(data
 })).await;
 
 let mut receiver = peer.last_block_receiver()
@@ -36,7 +37,7 @@ tokio::spawn(async move {
   while let Some(block) = receiver.recv().await {
     for data in block.data.iter() {
       data.data; // do something with your data
-    }    
+    } 
   }
 });
 
