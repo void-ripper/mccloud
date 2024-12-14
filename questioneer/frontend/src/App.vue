@@ -6,7 +6,7 @@ import { RouterLink, RouterView } from 'vue-router'
 header.container
   nav.navbar
     .navbar-brand
-      .navbar-item.is-size-3 Claymore
+      .navbar-item.is-size-3 McRiddle
     .navbar-menu
       .navbar-start
         RouterLink.navbar-item(to="/") Home
