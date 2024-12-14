@@ -1,11 +1,11 @@
 use std::{
-    collections::HashMap,
     fs::{File, OpenOptions},
     io::{BufReader, Read, Seek, SeekFrom, Write},
     path::PathBuf,
 };
 
 use borsh::{BorshDeserialize, BorshSerialize};
+use hashbrown::HashMap;
 use k256::{
     ecdsa::signature::hazmat::{PrehashSigner, PrehashVerifier},
     schnorr::{Signature, SigningKey, VerifyingKey},
@@ -156,7 +156,7 @@ pub struct Block {
     /// The data of this block.
     pub data: Vec<Data>,
     /// The next block author.
-    pub next_choice: PubKeyBytes,
+    pub next_choices: Vec<PubKeyBytes>,
     /// The current block author.
     pub author: PubKeyBytes,
     /// The signature of the block data, created with the private key of the author.
@@ -165,7 +165,7 @@ pub struct Block {
 
 impl Block {
     pub fn verify(&self) -> Result<bool> {
-        let hash = hash_data(&self.parent, &self.author, &self.next_choice, &self.data);
+        let hash = hash_data(&self.parent, &self.author, &self.next_choices, &self.data);
         let verifier = ex!(VerifyingKey::from_bytes(&self.author[1..]), encrypt);
         let sign = ex!(Signature::try_from(&self.sign[..]), encrypt);
         ex!(verifier.verify_prehash(&hash, &sign), encrypt);
@@ -180,19 +180,23 @@ pub struct Blockchain {
     pub cache: HashMap<SignBytes, Data>,
     pub root: Option<HashBytes>,
     pub last: Option<HashBytes>,
-    next_author: Option<PubKeyBytes>,
+    pub next_authors: Vec<PubKeyBytes>,
     pub count: u64,
     block_pos: u64,
 }
 
-fn hash_data(last: &Option<HashBytes>, pubkey: &PubKeyBytes, next: &PubKeyBytes, data: &[Data]) -> Vec<u8> {
+fn hash_data(last: &Option<HashBytes>, pubkey: &PubKeyBytes, next: &[PubKeyBytes], data: &[Data]) -> Vec<u8> {
     let mut hsh = Sha256::new();
 
     if let Some(parent) = last {
         hsh.update(parent);
     }
     hsh.update(pubkey);
-    hsh.update(next);
+
+    for n in next {
+        hsh.update(n);
+    }
+
     for d in data.iter() {
         hsh.update(&d.data);
         hsh.update(d.author);
@@ -231,9 +235,9 @@ impl Blockchain {
                 let buffer = ex!(zstd::stream::decode_all(buffer.as_slice()), io);
                 let blk: Block = borsh::from_slice(&buffer).unwrap();
 
-                (Some(last.hash), Some(blk.next_choice), last.pos + last.size)
+                (Some(last.hash), blk.next_choices, last.pos + last.size)
             } else {
-                (None, None, 0)
+                (None, Vec::new(), 0)
             };
             (root, last, block_pos, cnt, next)
         } else {
@@ -253,7 +257,7 @@ impl Blockchain {
                     .open(&db_file),
                 io
             );
-            (None, None, 0, 0, None)
+            (None, None, 0, 0, Vec::new())
         };
 
         Ok(Self {
@@ -262,7 +266,7 @@ impl Blockchain {
             cache: HashMap::new(),
             root,
             last,
-            next_author: next,
+            next_authors: next,
             count: cnt,
             block_pos,
         })
@@ -273,7 +277,7 @@ impl Blockchain {
     }
 
     /// Creates a new block. The block is *not* added to the block chain.
-    pub fn create_block(&mut self, next: PubKeyBytes, pubkey: PubKeyBytes, secret: &SecretKey) -> Result<Block> {
+    pub fn create_block(&mut self, next: Vec<PubKeyBytes>, pubkey: PubKeyBytes, secret: &SecretKey) -> Result<Block> {
         let data: Vec<Data> = self.cache.drain().map(|(_k, v)| v).collect();
         let signer = SigningKey::from(secret);
         let hash = hash_data(&self.last, &pubkey, &next, &data);
@@ -286,7 +290,7 @@ impl Blockchain {
         Ok(Block {
             parent: self.last,
             author: pubkey,
-            next_choice: next,
+            next_choices: next,
             data,
             hash: hshbytes,
             sign: signbytes,
@@ -299,15 +303,14 @@ impl Blockchain {
             return Err(Error::non_child_block(line!(), module_path!(), blk.hash));
         }
 
-        if let Some(next) = &self.next_author {
-            if blk.author != *next {
-                return Err(Error::unexpected_block_author(
-                    line!(),
-                    module_path!(),
-                    &blk.hash,
-                    &blk.author,
-                ));
-            }
+        if self.root.is_some() && !self.next_authors.contains(&blk.author) {
+            return Err(Error::unexpected_block_author(
+                line!(),
+                module_path!(),
+                &blk.hash,
+                &blk.author,
+                &self.next_authors,
+            ));
         }
 
         ex!(blk.verify(), source);
@@ -321,7 +324,7 @@ impl Blockchain {
         }
 
         self.last = Some(blk.hash);
-        self.next_author = Some(blk.next_choice);
+        self.next_authors = blk.next_choices.clone();
         self.count += 1;
 
         let data = ex!(borsh::to_vec(&blk), io);

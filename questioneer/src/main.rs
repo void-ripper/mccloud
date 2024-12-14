@@ -24,8 +24,8 @@ impl App {
         for p in self.peers.values() {
             let data = PeerData {
                 id: p.pubhex(),
-                connections: p.client_pubkeys().await.into_iter().map(|n| hex::encode(n)).collect(),
-                all_known: p.known_pubkeys().await.into_iter().map(|n| hex::encode(n)).collect(),
+                connections: p.client_pubkeys().await.into_iter().map(hex::encode).collect(),
+                all_known: p.known_pubkeys().await.into_iter().map(hex::encode).collect(),
             };
             peers.push(data);
         }
@@ -43,6 +43,7 @@ impl App {
                 thin,
                 relationship_time: Duration::from_millis(5000),
                 relationship_count: 2,
+                next_candidates: 3,
             };
             self.port_pool += 1;
 

@@ -1,12 +1,14 @@
 #![doc = include_str!("../../README.md")]
 
 use std::{
-    collections::{hash_map::Entry, HashMap, HashSet},
     future::Future,
     net::SocketAddr,
     path::PathBuf,
     pin::Pin,
-    sync::{Arc, Weak},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Weak,
+    },
     time::{Duration, SystemTime},
 };
 
@@ -14,6 +16,7 @@ use blockchain::{Block, BlockIterator, Blockchain, Data};
 use client::{ClientInfo, ClientWriter};
 use error::ErrorKind;
 pub use error::{Error, Result};
+use hashbrown::{hash_map::Entry, HashMap, HashSet};
 use indexmap::{IndexMap, IndexSet};
 use k256::{
     elliptic_curve::{rand_core::OsRng, sec1::ToEncodedPoint},
@@ -59,6 +62,7 @@ pub struct Config {
     pub relationship_time: Duration,
     /// How many connections a node should have.
     pub relationship_count: u32,
+    pub next_candidates: u32,
 }
 
 type Clients = HashMap<PubKeyBytes, Arc<ClientInfo>>;
@@ -79,6 +83,7 @@ pub struct Peer {
     known: Mutex<IndexMap<PubKeyBytes, SystemTime>>,
     blockchain: Mutex<Blockchain>,
     on_block_creation: Mutex<Option<Box<OnCreateCb>>>,
+    is_block_gathering: AtomicBool,
 }
 
 impl Peer {
@@ -86,7 +91,7 @@ impl Peer {
         let prikey = k256::SecretKey::random(&mut OsRng);
         let mut pubkey: PubKeyBytes = [0u8; 33];
         pubkey.copy_from_slice(prikey.public_key().to_encoded_point(true).as_bytes());
-        let (to_shutdown, mut rx_shutdown) = broadcast::channel(1);
+        let (to_shutdown, _) = broadcast::channel(1);
 
         let blockchain = ex!(Blockchain::new(&cfg.folder), source);
 
@@ -118,6 +123,7 @@ impl Peer {
             known: Mutex::new(IndexMap::new()),
             blockchain: Mutex::new(blockchain),
             on_block_creation: Mutex::new(None),
+            is_block_gathering: AtomicBool::new(false),
         });
 
         let p0 = peer.clone();
@@ -130,26 +136,8 @@ impl Peer {
         if !peer.cfg.thin {
             let p1 = peer.clone();
             tokio::spawn(async move {
-                let mut interval = time::interval(p1.cfg.keep_alive);
-                let msg = Message::keepalive(&p1.pubkey, &p1.prikey);
-
-                loop {
-                    select! {
-                        _ = rx_shutdown.recv() => { break; }
-                        _ = interval.tick() => {
-                            if let Err(e) = p1.broadcast(msg.clone()).await {
-                                tracing::error!("{} {}", p1.pubhex, e);
-                            }
-
-                            p1.known.lock().await.retain(|_k, v| {
-                                if let Ok(elapsed) = v.elapsed() {
-                                    elapsed < p1.cfg.keep_alive
-                                } else {
-                                    false
-                                }
-                            });
-                        }
-                    }
+                if let Err(e) = p1.send_and_check_keepalive().await {
+                    tracing::error!("{} keepalive: {}", p1.pubhex, e);
                 }
             });
 
@@ -162,6 +150,36 @@ impl Peer {
         }
 
         Ok(peer)
+    }
+
+    async fn send_and_check_keepalive(&self) -> Result<()> {
+        let mut interval = time::interval(self.cfg.keep_alive);
+        let msg = Message::keepalive(&self.pubkey, &self.prikey);
+        let mut rx_shutdown = self.to_shutdown.subscribe();
+
+        loop {
+            select! {
+                _ = rx_shutdown.recv() => { break; }
+                _ = interval.tick() => {
+                    if let Err(e) = self.broadcast(msg.clone()).await {
+                        tracing::error!("{} {}", self.pubhex, e);
+                    }
+
+                    self.known.lock().await.retain(|_k, v| {
+                        if let Ok(elapsed) = v.elapsed() {
+                            elapsed < self.cfg.keep_alive
+                        } else {
+                            false
+                        }
+                    });
+
+                    if !self.is_block_gathering.load(Ordering::SeqCst) && self.check_is_me_next().await {
+                        self.start_block_gathering();
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 
     async fn establish_relationship(&self) -> Result<()> {
@@ -386,15 +404,77 @@ impl Peer {
         }
 
         let next_author = {
+            let mut nexts = Vec::new();
             let k = self.known.lock().await;
-            k.get_index(rand::random::<usize>() % k.len())
-                .map(|(k, _v)| *k)
-                .unwrap()
+            for _ in 0..self.cfg.next_candidates {
+                nexts.push(
+                    k.get_index(rand::random::<usize>() % k.len())
+                        .map(|(k, _v)| *k)
+                        .unwrap(),
+                );
+            }
+            nexts
         };
         let blk = ex!(blkch.create_block(next_author, self.pubkey, &self.prikey), source);
         ex!(blkch.add_block(blk.clone()), source);
 
         Ok(blk)
+    }
+
+    async fn check_is_me_next(&self) -> bool {
+        let mut me_next = false;
+        let known = self.known.lock().await;
+        let blkch = self.blockchain.lock().await;
+        for nxt in blkch.next_authors.iter() {
+            if known.contains_key(nxt) {
+                break;
+            } else if *nxt == self.pubkey {
+                me_next = true;
+                break;
+            }
+        }
+        me_next
+    }
+
+    fn start_block_gathering(&self) {
+        self.is_block_gathering.store(true, Ordering::SeqCst);
+        let peer = self.me.upgrade().unwrap();
+        tokio::spawn(async move {
+            tracing::info!("{} me is next xD", peer.pubhex);
+            let mut interval = time::interval(peer.cfg.data_gather_time);
+            let mut to_shutdown = peer.to_shutdown.subscribe();
+
+            let res: Result<()> = async {
+                loop {
+                    select! {
+                        _ = interval.tick() => {
+                            let mut blkch = peer.blockchain.lock().await;
+                            if !blkch.cache.is_empty() {
+                                let block = ex!(peer.create_next_block(&mut blkch).await, source);
+                                ex!(
+                                    peer.broadcast(Message::ShareBlock { block: block.clone() }).await,
+                                    source
+                                );
+                                if peer.last_block_tx.receiver_count() > 0 {
+                                    ex!(peer.last_block_tx.send(block), sync);
+                                }
+                                break;
+                            }
+                        }
+                        _ = to_shutdown.recv() => { break; }
+                    }
+                }
+
+                peer.is_block_gathering.store(false, Ordering::SeqCst);
+
+                Ok(())
+            }
+            .await;
+
+            if let Err(e) = res {
+                tracing::error!("{} {}", peer.pubhex, e);
+            }
+        });
     }
 
     async fn on_message(&self, msg: Message, cl: Arc<ClientInfo>) -> Result<()> {
@@ -497,47 +577,19 @@ impl Peer {
     }
 
     async fn on_share_block(&self, block: Block, cl: Arc<ClientInfo>) -> Result<()> {
-        tracing::info!("{} share block {}", self.pubhex, hex::encode(block.hash));
         let last = self.blockchain.lock().await.last;
         if last.map(|n| n == block.hash).unwrap_or(false) {
             // we get the same block again, just ignore it
             return Ok(());
         }
 
-        if self.pubkey == block.next_choice {
-            tracing::info!("{} me is next xD", self.pubhex);
+        tracing::info!("{} share block {}", self.pubhex, hex::encode(block.hash));
 
-            let peer = self.me.upgrade().unwrap();
-            tokio::spawn(async move {
-                let mut interval = time::interval(peer.cfg.data_gather_time);
-                let res: Result<()> = async {
-                    loop {
-                        interval.tick().await;
-
-                        let mut blkch = peer.blockchain.lock().await;
-                        if !blkch.cache.is_empty() {
-                            let block = ex!(peer.create_next_block(&mut blkch).await, source);
-                            ex!(
-                                peer.broadcast(Message::ShareBlock { block: block.clone() }).await,
-                                source
-                            );
-                            if peer.last_block_tx.receiver_count() > 0 {
-                                ex!(peer.last_block_tx.send(block), sync);
-                            }
-                            break;
-                        }
-                    }
-
-                    Ok(())
-                }
-                .await;
-
-                if let Err(e) = res {
-                    tracing::error!("{} {}", peer.pubhex, e);
-                }
-            });
-        }
         ex!(self.blockchain.lock().await.add_block(block.clone()), source);
+
+        if self.check_is_me_next().await {
+            self.start_block_gathering();
+        }
 
         ex!(
             self.broadcast_except(Message::ShareBlock { block: block.clone() }, &cl)

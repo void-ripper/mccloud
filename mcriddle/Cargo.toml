@@ -13,6 +13,7 @@ readme.workspace = true
 aes = "0.8.4"
 borsh = { version = "1.5.3", features = ["borsh-derive", "derive"] }
 cbc = { version = "0.1.2", features = ["std"] }
+hashbrown = "0.15.2"
 hex = "0.4.3"
 indexmap = "2.7.0"
 k256 = { version = "0.13.4", features = ["ecdh", "ecdsa"] }

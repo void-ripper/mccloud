@@ -110,16 +110,25 @@ impl Error {
         }
     }
 
-    pub fn unexpected_block_author(line: u32, module: &str, hsh: &HashBytes, author: &PubKeyBytes) -> Self {
+    pub fn unexpected_block_author(
+        line: u32,
+        module: &str,
+        hsh: &HashBytes,
+        author: &PubKeyBytes,
+        expected: &[PubKeyBytes],
+    ) -> Self {
+        let expect: Vec<String> = expected.iter().map(hex::encode).collect();
+        let expect = expect.join("\n");
         Self {
             source: None,
             kind: ErrorKind::Blockchain,
             line,
             module: module.into(),
             msg: Some(format!(
-                "block ({}) has unexpected author {}",
+                "block ({}) has unexpected author {}:\n{}",
                 hex::encode(hsh),
-                hex::encode(author)
+                hex::encode(author),
+                expect
             )),
         }
     }
@@ -140,7 +149,7 @@ impl std::error::Error for Error {}
 impl Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         if let Some(src) = &self.source {
-            write!(f, "{src}\n")?;
+            writeln!(f, "{src}")?;
         }
         write!(f, "{:?} {} {}: {:?}", self.kind, self.module, self.line, self.msg)
     }
