@@ -62,7 +62,23 @@ pub struct Config {
     pub relationship_time: Duration,
     /// How many connections a node should have.
     pub relationship_count: u32,
+    /// How many candidates are allowed for the next block.
     pub next_candidates: u32,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            addr: ([0, 0, 0, 0], 29092).into(),
+            folder: "data".into(),
+            keep_alive: Duration::from_millis(300),
+            data_gather_time: Duration::from_millis(750),
+            thin: false,
+            relationship_time: Duration::from_secs(10),
+            relationship_count: 3,
+            next_candidates: 3,
+        }
+    }
 }
 
 type Clients = HashMap<PubKeyBytes, Arc<ClientInfo>>;
