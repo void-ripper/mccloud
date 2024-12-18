@@ -28,11 +28,13 @@ use tokio::{
     sync::{broadcast, mpsc, Mutex},
     time,
 };
+pub use version::Version;
 
 pub mod blockchain;
 mod client;
 pub mod error;
 mod message;
+mod version;
 
 #[macro_export]
 macro_rules! ex {
@@ -410,8 +412,10 @@ impl Peer {
 
                 if reconn_cnt > 0 {
                     tokio::time::sleep(Duration::from_secs(15)).await;
-                    if let Err(e) = peer.to_accept.send((addr, reconn_cnt - 1)).await {
-                        tracing::error!("{} {}", peer.pubhex, e);
+                    if !peer.to_accept.is_closed() {
+                        if let Err(e) = peer.to_accept.send((addr, reconn_cnt - 1)).await {
+                            tracing::error!("{} {}", peer.pubhex, e);
+                        }
                     }
                 }
             });
