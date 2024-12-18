@@ -623,15 +623,18 @@ impl Peer {
     }
 
     async fn on_share_block(&self, block: Block, cl: Arc<ClientInfo>) -> Result<()> {
-        let last = self.blockchain.lock().await.last;
-        if last.map(|n| n == block.hash).unwrap_or(false) {
-            // we get the same block again, just ignore it
-            return Ok(());
+        {
+            let mut blkch = self.blockchain.lock().await;
+            let last = blkch.last;
+            if last.map(|n| n == block.hash).unwrap_or(false) {
+                // we get the same block again, just ignore it
+                return Ok(());
+            }
+
+            tracing::info!("{} share block {}", self.pubhex, hex::encode(block.hash));
+
+            ex!(blkch.add_block(block.clone()), source);
         }
-
-        tracing::info!("{} share block {}", self.pubhex, hex::encode(block.hash));
-
-        ex!(self.blockchain.lock().await.add_block(block.clone()), source);
 
         ex!(
             self.broadcast_except(Message::ShareBlock { block: block.clone() }, &cl)
