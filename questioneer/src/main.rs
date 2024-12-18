@@ -68,8 +68,9 @@ impl App {
     fn delete_peer(&mut self, pubkey: &str) {
         if let Some(v) = self.peers.swap_remove(pubkey) {
             if let Err(e) = v.shutdown() {
-                tracing::error!("{e}");
+                tracing::error!("on shutown {e}");
             }
+            std::fs::remove_dir_all(&v.cfg.folder).unwrap();
         }
     }
 }
