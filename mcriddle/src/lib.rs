@@ -17,7 +17,6 @@ use client::{ClientInfo, ClientWriter};
 use error::ErrorKind;
 pub use error::{Error, Result};
 use hashbrown::{hash_map::Entry, HashMap, HashSet};
-use indexmap::{IndexMap, IndexSet};
 use k256::{
     elliptic_curve::{rand_core::OsRng, sec1::ToEncodedPoint},
     SecretKey,
@@ -107,7 +106,7 @@ pub struct Peer {
     last_block_tx: broadcast::Sender<Block>,
     to_shutdown: broadcast::Sender<bool>,
     clients: Mutex<Clients>,
-    known: Mutex<IndexMap<PubKeyBytes, SystemTime>>,
+    known: Mutex<HashMap<PubKeyBytes, SystemTime>>,
     blockchain: Mutex<Blockchain>,
     on_block_creation: Mutex<Option<Box<OnCreateCb>>>,
     is_block_gathering: AtomicBool,
@@ -147,7 +146,7 @@ impl Peer {
             last_block_tx,
             to_shutdown,
             clients: Mutex::new(HashMap::new()),
-            known: Mutex::new(IndexMap::new()),
+            known: Mutex::new(HashMap::new()),
             blockchain: Mutex::new(blockchain),
             on_block_creation: Mutex::new(None),
             is_block_gathering: AtomicBool::new(false),
@@ -192,6 +191,10 @@ impl Peer {
                         tracing::error!("{} {}", self.pubhex, e);
                     }
 
+                    if !self.is_block_gathering.load(Ordering::SeqCst) && self.check_is_me_next().await {
+                        self.start_block_gathering();
+                    }
+
                     self.known.lock().await.retain(|_k, v| {
                         if let Ok(elapsed) = v.elapsed() {
                             elapsed < self.cfg.keep_alive
@@ -199,10 +202,6 @@ impl Peer {
                             false
                         }
                     });
-
-                    if !self.is_block_gathering.load(Ordering::SeqCst) && self.check_is_me_next().await {
-                        self.start_block_gathering();
-                    }
                 }
             }
         }
@@ -355,12 +354,14 @@ impl Peer {
                 self.known.lock().await.insert(pubkey, SystemTime::now());
             }
 
-            let mut blkch = self.blockchain.lock().await;
+            {
+                let blkch = self.blockchain.lock().await;
 
-            if !self.cfg.thin && !thin && root.is_none() && blkch.root.is_none() {
-                if self.pubkey > pubkey {}
-            } else if blkch.root.is_none() || count > blkch.count {
-                ex!(cl.write(&Message::RequestBlocks { start: blkch.last }).await, source);
+                if !self.cfg.thin && !thin && root.is_none() && blkch.root.is_none() {
+                    if self.pubkey > pubkey {}
+                } else if blkch.root.is_none() || count > blkch.count {
+                    ex!(cl.write(&Message::RequestBlocks { start: blkch.last }).await, source);
+                }
             }
 
             let pubkey = cl.pubkey;
@@ -435,13 +436,9 @@ impl Peer {
 
         let next_author = {
             let mut nexts = Vec::new();
-            let k = self.known.lock().await;
-            for _ in 0..self.cfg.next_candidates {
-                nexts.push(
-                    k.get_index(rand::random::<usize>() % k.len())
-                        .map(|(k, _v)| *k)
-                        .unwrap(),
-                );
+            let mut k: Vec<PubKeyBytes> = self.known.lock().await.keys().cloned().collect();
+            while !k.is_empty() && nexts.len() < self.cfg.next_candidates as _ {
+                nexts.push(k.swap_remove(rand::random::<usize>() % k.len()));
             }
             nexts
         };
@@ -463,7 +460,7 @@ impl Peer {
             }
         }
 
-        if !known.is_empty() {
+        if !known.is_empty() && !blkch.cache.is_empty() {
             let mut known: Vec<PubKeyBytes> = known.keys().cloned().collect();
             known.push(self.pubkey);
             known.sort_unstable();
@@ -722,7 +719,7 @@ impl Peer {
     }
 
     /// Returns all known public keys.
-    pub async fn known_pubkeys(&self) -> IndexSet<PubKeyBytes> {
+    pub async fn known_pubkeys(&self) -> HashSet<PubKeyBytes> {
         self.known.lock().await.keys().cloned().collect()
     }
 
