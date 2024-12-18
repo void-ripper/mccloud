@@ -80,7 +80,7 @@ impl Default for Config {
         Self {
             addr: ([0, 0, 0, 0], 29092).into(),
             folder: "data".into(),
-            keep_alive: Duration::from_millis(300),
+            keep_alive: Duration::from_millis(600),
             data_gather_time: Duration::from_millis(750),
             thin: false,
             relationship: ConfigRelationship {
@@ -175,6 +175,11 @@ impl Peer {
                     tracing::error!("{} {}", p2.pubhex, e);
                 }
             });
+
+            let p3 = peer.clone();
+            tokio::spawn(async move {
+                p3.check_for_block_gathering().await;
+            });
         }
 
         Ok(peer)
@@ -208,6 +213,21 @@ impl Peer {
             }
         }
         Ok(())
+    }
+
+    async fn check_for_block_gathering(&self) {
+        let mut rx_shutdown = self.to_shutdown.subscribe();
+
+        loop {
+            select! {
+                _ = rx_shutdown.recv() => { break; }
+                _ = time::sleep(self.cfg.keep_alive) => {
+                    if !self.is_block_gathering.load(Ordering::SeqCst) && self.check_is_me_next().await {
+                        self.start_block_gathering();
+                    }
+                }
+            }
+        }
     }
 
     async fn establish_relationship(&self) -> Result<()> {
@@ -554,25 +574,25 @@ impl Peer {
             return Ok(());
         }
 
-        if ex!(m.verify(), source) {
-            let previous = self.known.lock().await.insert(pubkey, SystemTime::now());
+        // if ex!(m.verify(), source) {
+        let previous = self.known.lock().await.insert(pubkey, SystemTime::now());
 
-            if let Some(old) = previous {
-                // tracing::debug!("{} keep alive {}", self.pubhex, hex::encode(&pubkey));
-                let elapsed = old.elapsed().unwrap_or(self.cfg.keep_alive);
-                let delta = if elapsed >= self.cfg.keep_alive {
-                    0
-                } else {
-                    (self.cfg.keep_alive - elapsed).as_millis()
-                };
+        if let Some(old) = previous {
+            // tracing::debug!("{} keep alive {}", self.pubhex, hex::encode(&pubkey));
+            let elapsed = old.elapsed().unwrap_or(self.cfg.keep_alive);
+            let delta = if elapsed >= self.cfg.keep_alive {
+                0
+            } else {
+                (self.cfg.keep_alive - elapsed).as_millis()
+            };
 
-                if delta < 50 {
-                    ex!(self.broadcast_except(m, &cl).await, source);
-                }
-            } else if previous.is_none() {
+            if delta < 50 {
                 ex!(self.broadcast_except(m, &cl).await, source);
             }
+        } else if previous.is_none() {
+            ex!(self.broadcast_except(m, &cl).await, source);
         }
+        // }
 
         Ok(())
     }

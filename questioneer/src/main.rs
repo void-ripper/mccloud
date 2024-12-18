@@ -38,8 +38,8 @@ impl App {
             let cfg = Config {
                 addr: ([127, 0, 0, 1], self.port_pool).into(),
                 folder: PathBuf::from("data").join(self.port_pool.to_string()),
-                keep_alive: Duration::from_millis(250),
-                data_gather_time: Duration::from_millis(500),
+                keep_alive: Duration::from_millis(1450),
+                data_gather_time: Duration::from_millis(800),
                 thin,
                 relationship: mcriddle::ConfigRelationship {
                     time: Duration::from_millis(5000),
@@ -71,6 +71,9 @@ impl App {
                 tracing::error!("on shutown {e}");
             }
             std::fs::remove_dir_all(&v.cfg.folder).unwrap();
+        }
+        if self.peers.capacity() > self.peers.len() * 2 {
+            self.peers.shrink_to_fit();
         }
     }
 }
