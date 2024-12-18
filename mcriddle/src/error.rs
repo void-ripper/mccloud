@@ -151,6 +151,10 @@ impl Display for Error {
         if let Some(src) = &self.source {
             writeln!(f, "{src}")?;
         }
-        write!(f, "{:?} {} {}: {:?}", self.kind, self.module, self.line, self.msg)
+        if let Some(msg) = &self.msg {
+            write!(f, "{:?} {} {}: {}", self.kind, self.module, self.line, msg)
+        } else {
+            write!(f, "{:?} {} {}", self.kind, self.module, self.line)
+        }
     }
 }
