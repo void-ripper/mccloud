@@ -61,9 +61,11 @@ Modal(title="Connect To" :show="showConnect" @close="showConnect = false" @ok="p
                 .box.content
                     h5 blocks
                     ol.mono
-                        li(v-for="blk in blocks") {{ blk.hash.substring(0, 12) }}
-                            ul
-                                li(v-for="d in blk.data") {{ d }}
+                      li(v-for="blk in blocks") {{ blk.hash.substring(0, 12) }}: {{ blk.author.substring(0, 12) }}
+                        ol
+                          li(v-for="n in blk.next_authors") {{ n.substring(0, 12) }}
+                        ul
+                          li(v-for="d in blk.data") {{ d }}
     .column
         LayoutD3(:peers="peerList" @pick="onPick")
 </template>

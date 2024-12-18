@@ -138,6 +138,8 @@ async fn peer_connect(state: AppPtr, Json(conn): Json<ConnData>) {
 pub struct BlockData {
     pub hash: String,
     pub data: Vec<String>,
+    pub author: String,
+    pub next_authors: Vec<String>,
 }
 
 async fn peer_blocks(state: AppPtr, Path(pubhex): Path<String>) -> Json<Vec<BlockData>> {
@@ -148,9 +150,13 @@ async fn peer_blocks(state: AppPtr, Path(pubhex): Path<String>) -> Json<Vec<Bloc
         for blk in p.block_iter().await {
             let b = blk.unwrap();
             let data: Vec<String> = b.data.into_iter().map(|d| String::from_utf8(d.data).unwrap()).collect();
+            let next: Vec<String> = b.next_choices.iter().map(hex::encode).collect();
+
             blocks.push(BlockData {
                 hash: hex::encode(b.hash),
                 data,
+                author: hex::encode(b.author),
+                next_authors: next,
             });
         }
     }
