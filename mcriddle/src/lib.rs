@@ -47,6 +47,16 @@ pub type HashBytes = [u8; 32];
 pub type SignBytes = [u8; 64];
 
 #[derive(Clone)]
+pub struct ConfigRelationship {
+    /// How many connections a node should have.
+    pub count: u32,
+    /// In which time intervals to look for new connections.
+    pub time: Duration,
+    /// How often to retry, after an already established connection is lost.
+    pub retry: u32,
+}
+
+#[derive(Clone)]
 pub struct Config {
     /// The address the peer is listening on.
     pub addr: SocketAddr,
@@ -58,10 +68,8 @@ pub struct Config {
     pub data_gather_time: Duration,
     /// A thin node does not participate in generating new blocks.
     pub thin: bool,
-    /// In which time intervals to look for new connections.
-    pub relationship_time: Duration,
-    /// How many connections a node should have.
-    pub relationship_count: u32,
+    /// The relationship config to other nodes.
+    pub relationship: ConfigRelationship,
     /// How many candidates are allowed for the next block.
     pub next_candidates: u32,
 }
@@ -74,8 +82,11 @@ impl Default for Config {
             keep_alive: Duration::from_millis(300),
             data_gather_time: Duration::from_millis(750),
             thin: false,
-            relationship_time: Duration::from_secs(10),
-            relationship_count: 3,
+            relationship: ConfigRelationship {
+                time: Duration::from_secs(10),
+                count: 3,
+                retry: 3,
+            },
             next_candidates: 3,
         }
     }
@@ -92,7 +103,7 @@ pub struct Peer {
     prikey: SecretKey,
     pubkey: PubKeyBytes,
     pubhex: String,
-    to_accept: mpsc::Sender<SocketAddr>,
+    to_accept: mpsc::Sender<(SocketAddr, u32)>,
     last_block_tx: broadcast::Sender<Block>,
     to_shutdown: broadcast::Sender<bool>,
     clients: Mutex<Clients>,
@@ -200,7 +211,7 @@ impl Peer {
 
     async fn establish_relationship(&self) -> Result<()> {
         let mut rx_shutdown = self.to_shutdown.subscribe();
-        let mut interval = time::interval(self.cfg.relationship_time);
+        let mut interval = time::interval(self.cfg.relationship.time);
 
         loop {
             select! {
@@ -208,11 +219,11 @@ impl Peer {
                 _ = interval.tick() => {
                     let current = self.clients.lock().await.len();
 
-                    if current < self.cfg.relationship_count as _ {
+                    if current < self.cfg.relationship.count as _ {
                         let keys: Vec<PubKeyBytes> = self.clients.lock().await.keys().cloned().collect();
                         ex!(
                             self.broadcast(Message::RequestNeighbours {
-                                count: self.cfg.relationship_count,
+                                count: self.cfg.relationship.count,
                                 exclude: keys,
                             })
                             .await,
@@ -247,7 +258,7 @@ impl Peer {
         Ok(())
     }
 
-    async fn listen(&self, mut to_accept: mpsc::Receiver<SocketAddr>) -> Result<()> {
+    async fn listen(&self, mut to_accept: mpsc::Receiver<(SocketAddr, u32)>) -> Result<()> {
         tracing::info!("{} listen on {}", self.pubhex, self.cfg.addr);
 
         let listener = ex!(TcpListener::bind(self.cfg.addr).await, io);
@@ -257,10 +268,10 @@ impl Peer {
             select! {
                 _ = rx_shutdown.recv() => { break; }
                 addr = to_accept.recv() => {
-                    if let Some(addr) = addr {
+                    if let Some((addr, reconn_cnt)) = addr {
                         match TcpStream::connect(addr).await {
                             Ok(sck) => {
-                                if let Err(e) = self.accept(addr, sck).await {
+                                if let Err(e) = self.accept(addr, sck, reconn_cnt).await {
                                     tracing::error!("{} {}", self.pubhex, e);
                                 }
                             }
@@ -273,7 +284,7 @@ impl Peer {
                 res = listener.accept() => {
                     match res {
                         Ok((sck, addr)) => {
-                            if let Err(e) = self.accept(addr, sck).await {
+                            if let Err(e) = self.accept(addr, sck, 0).await {
                                 tracing::error!("{} {}", self.pubhex, e);
                             }
                         }
@@ -290,7 +301,7 @@ impl Peer {
         Ok(())
     }
 
-    async fn accept(&self, addr: SocketAddr, sck: TcpStream) -> Result<()> {
+    async fn accept(&self, addr: SocketAddr, sck: TcpStream, reconn_cnt: u32) -> Result<()> {
         tracing::info!("{} accept {}", self.pubhex, addr);
 
         let (mut reader, writer) = sck.into_split();
@@ -399,6 +410,14 @@ impl Peer {
                 }
 
                 peer.clients.lock().await.remove(&pubkey);
+                // peer.known.lock().await.swap_remove(&pubkey);
+
+                if reconn_cnt > 0 {
+                    tokio::time::sleep(Duration::from_secs(15)).await;
+                    if let Err(e) = peer.to_accept.send((addr, reconn_cnt - 1)).await {
+                        tracing::error!("{} {}", peer.pubhex, e);
+                    }
+                }
             });
         } else {
             return Err(Error::protocol(
@@ -662,10 +681,10 @@ impl Peer {
         //     to_connect
         // );
         let cnt = self.clients.lock().await.len();
-        if cnt < self.cfg.relationship_count as _ {
-            let to_add = self.cfg.relationship_count as usize - cnt;
+        if cnt < self.cfg.relationship.count as _ {
+            let to_add = self.cfg.relationship.count as usize - cnt;
             for (_k, n) in neighbours.into_iter().take(to_add) {
-                ex!(self.to_accept.send(n).await, sync);
+                ex!(self.to_accept.send((n, self.cfg.relationship.retry)).await, sync);
             }
         }
 
@@ -703,7 +722,7 @@ impl Peer {
     /// Try to connect to another peer.
     pub async fn connect(&self, addr: SocketAddr) -> Result<()> {
         tracing::info!("{} connect to {}", self.pubhex, addr);
-        ex!(self.to_accept.send(addr).await, sync);
+        ex!(self.to_accept.send((addr, self.cfg.relationship.retry)).await, sync);
         Ok(())
     }
 
