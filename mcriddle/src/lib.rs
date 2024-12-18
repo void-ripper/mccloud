@@ -385,7 +385,10 @@ impl Peer {
                 let mut rx_nonce = nonce;
                 loop {
                     select! {
-                        _ = rx_shutdown.recv() => { break; }
+                        _ = rx_shutdown.recv() => {
+                            peer.clients.lock().await.remove(&pubkey);
+                            return;
+                        }
                         msg = ClientWriter::read(&mut reader, &shared) => {
                             match msg {
                                 Ok((nonce, msg)) => {
@@ -639,11 +642,16 @@ impl Peer {
     }
 
     async fn on_request_neighbours(&self, count: u32, exclude: Vec<PubKeyBytes>, cl: Arc<ClientInfo>) -> Result<()> {
-        let cls = self.clients.lock().await;
+        let possible: Vec<(PubKeyBytes, SocketAddr)> = {
+            let cls = self.clients.lock().await;
+            cls.iter().map(|(k, v)| (*k, v.listen)).collect()
+        };
         let mut exclude: HashSet<PubKeyBytes> = exclude.into_iter().collect();
-        let mut to_share = Vec::new();
 
         exclude.insert(cl.pubkey);
+
+        let mut possible: Vec<(PubKeyBytes, SocketAddr)> =
+            possible.into_iter().filter(|(k, _)| !exclude.contains(k)).collect();
 
         // let to_exclude: Vec<String> = exclude.iter().map(|x| hex::encode(x)).collect();
         // let to_exclude = to_exclude.join("\n");
@@ -654,11 +662,14 @@ impl Peer {
         //     to_exclude
         // );
 
-        for (k, cl) in cls.iter() {
-            if !exclude.contains(k) && to_share.len() < count as _ {
-                let listen = cl.listen;
-                to_share.push((*k, listen));
+        let mut to_share = Vec::new();
+        if count < possible.len() as _ {
+            while to_share.len() < count as _ {
+                let m = possible.swap_remove(rand::random::<usize>() % possible.len());
+                to_share.push(m);
             }
+        } else {
+            to_share.extend(possible.into_iter());
         }
 
         if !to_share.is_empty() {
