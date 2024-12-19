@@ -38,7 +38,7 @@ impl App {
             let cfg = Config {
                 addr: ([127, 0, 0, 1], self.port_pool).into(),
                 folder: PathBuf::from("data").join(self.port_pool.to_string()),
-                keep_alive: Duration::from_millis(1450),
+                keep_alive: Duration::from_millis(10_000),
                 data_gather_time: Duration::from_millis(800),
                 thin,
                 relationship: mcriddle::ConfigRelationship {

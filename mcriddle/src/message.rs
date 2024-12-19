@@ -28,6 +28,7 @@ pub enum Message {
     },
     KeepAlive {
         pubkey: PubKeyBytes,
+        count: u64,
         sign: SignBytes,
     },
     ShareData {
@@ -52,23 +53,24 @@ pub enum Message {
 }
 
 impl Message {
-    pub fn keepalive(pubkey: &PubKeyBytes, prikey: &SecretKey) -> Self {
+    pub fn keepalive(pubkey: &PubKeyBytes, prikey: &SecretKey, count: u64) -> Self {
         let signer = SigningKey::from(prikey);
-        let sign: Signature = signer.sign(pubkey);
+        let sign: Signature = signer.sign(&count.to_le_bytes());
         let sign_bytes = sign.to_bytes();
 
         Self::KeepAlive {
             pubkey: *pubkey,
+            count,
             sign: sign_bytes,
         }
     }
 
     pub fn verify(&self) -> Result<bool> {
         match self {
-            Self::KeepAlive { pubkey, sign } => {
+            Self::KeepAlive { pubkey, count, sign } => {
                 let verifier = ex!(VerifyingKey::from_bytes(&pubkey[1..]), encrypt);
                 let signature = ex!(Signature::try_from(&sign[..]), encrypt);
-                ex!(verifier.verify(pubkey, &signature), encrypt);
+                ex!(verifier.verify(&count.to_le_bytes(), &signature), encrypt);
 
                 Ok(true)
             }

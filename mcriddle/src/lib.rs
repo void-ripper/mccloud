@@ -116,7 +116,7 @@ pub struct Peer {
     last_block_tx: broadcast::Sender<Block>,
     to_shutdown: broadcast::Sender<bool>,
     clients: Mutex<Clients>,
-    known: Mutex<HashMap<PubKeyBytes, SystemTime>>,
+    known: Mutex<HashMap<PubKeyBytes, (u64, SystemTime)>>,
     blockchain: Mutex<Blockchain>,
     on_block_creation: Mutex<Option<Box<OnCreateCb>>>,
     is_block_gathering: AtomicBool,
@@ -168,7 +168,7 @@ impl Peer {
         let p0 = peer.clone();
         tokio::spawn(async move {
             if let Err(e) = p0.listen(to_accept_rx).await {
-                tracing::error!("{} Loop: {e}", p0.pubhex);
+                tracing::error!("{} listen: {e}", p0.pubhex);
             }
         });
 
@@ -183,7 +183,7 @@ impl Peer {
             let p2 = peer.clone();
             tokio::spawn(async move {
                 if let Err(e) = p2.establish_relationship().await {
-                    tracing::error!("{} {}", p2.pubhex, e);
+                    tracing::error!("{} relationship: {}", p2.pubhex, e);
                 }
             });
 
@@ -198,20 +198,25 @@ impl Peer {
 
     async fn send_and_check_keepalive(&self) -> Result<()> {
         let mut interval = time::interval(self.cfg.keep_alive);
-        let msg = Message::keepalive(&self.pubkey, &self.prikey);
         let mut rx_shutdown = self.to_shutdown.subscribe();
+        let cutoff = self.cfg.keep_alive + self.cfg.keep_alive / 2;
+        let mut count = 1;
 
         loop {
             select! {
                 _ = rx_shutdown.recv() => { break; }
                 _ = interval.tick() => {
+                    let msg = Message::keepalive(&self.pubkey, &self.prikey, count);
+                    let (nxt, _overflow) = count.overflowing_add(1) ;
+                    count = nxt;
+
                     if let Err(e) = self.broadcast(msg.clone()).await {
                         tracing::error!("{} {}", self.pubhex, e);
                     }
 
                     self.known.lock().await.retain(|_k, v| {
-                        if let Ok(elapsed) = v.elapsed() {
-                            elapsed < self.cfg.keep_alive
+                        if let Ok(elapsed) = v.1.elapsed() {
+                            elapsed < cutoff
                         } else {
                             false
                         }
@@ -404,7 +409,7 @@ impl Peer {
             };
 
             if !thin {
-                self.known.lock().await.insert(pubkey, SystemTime::now());
+                self.known.lock().await.insert(pubkey, (0, SystemTime::now()));
             }
 
             if (myroot.is_none() || count > mycount) && last.is_some() {
@@ -582,8 +587,8 @@ impl Peer {
             Message::Greeting { .. } => {
                 tracing::error!("{} we should never get a second greeting", self.pubhex);
             }
-            m @ Message::KeepAlive { pubkey, .. } => {
-                ex!(self.on_keepalive(pubkey, m, cl).await, source);
+            m @ Message::KeepAlive { pubkey, count, .. } => {
+                ex!(self.on_keepalive(pubkey, count, m, cl).await, source);
             }
             Message::ShareData { data } => {
                 ex!(self.on_share_data(data, cl).await, source);
@@ -608,23 +613,23 @@ impl Peer {
         Ok(())
     }
 
-    async fn on_keepalive(&self, pubkey: PubKeyBytes, m: Message, cl: Arc<ClientInfo>) -> Result<()> {
+    async fn on_keepalive(&self, pubkey: PubKeyBytes, count: u64, m: Message, cl: Arc<ClientInfo>) -> Result<()> {
         if pubkey == self.pubkey {
             return Ok(());
         }
 
         // if ex!(m.verify(), source) {
-        let previous = self.known.lock().await.insert(pubkey, SystemTime::now());
-
-        if let Some(old) = previous {
-            // tracing::debug!("{} keep alive {}", self.pubhex, hex::encode(&pubkey));
-            let elapsed = old.elapsed().unwrap_or(self.cfg.keep_alive);
-
-            if elapsed >= self.cfg.keep_alive {
+        match self.known.lock().await.entry(pubkey) {
+            Entry::Occupied(mut e) => {
+                if count > e.get().0 || count == 0 {
+                    e.insert((count, SystemTime::now()));
+                    ex!(self.broadcast_except(m, &cl).await, source);
+                }
+            }
+            Entry::Vacant(e) => {
+                e.insert((count, SystemTime::now()));
                 ex!(self.broadcast_except(m, &cl).await, source);
             }
-        } else if previous.is_none() {
-            ex!(self.broadcast_except(m, &cl).await, source);
         }
         // }
 
