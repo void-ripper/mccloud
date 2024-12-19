@@ -125,7 +125,9 @@ impl Peer {
         let blockchain = ex!(Blockchain::new(&cfg.folder), source);
 
         let pubhex: String = hex::encode(pubkey);
+        let version = Version::default();
 
+        tracing::info!("{version}");
         tracing::info!(
             "root block {}",
             blockchain.root.as_ref().map(hex::encode).unwrap_or_default()
@@ -141,7 +143,7 @@ impl Peer {
         let peer = Arc::new_cyclic(|me| Self {
             // let peer = Arc::new(Self {
             me: me.clone(),
-            version: Version::default(),
+            version,
             prikey,
             pubkey,
             pubhex,
