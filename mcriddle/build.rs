@@ -6,7 +6,7 @@ fn main() {
     let commit = String::from_utf8_lossy(&commit.stdout);
 
     let branch = std::process::Command::new("git")
-        .args(["rev-parse", "abbrev-ref", "HEAD"])
+        .args(["rev-parse", "--abbrev-ref", "HEAD"])
         .output()
         .unwrap();
     let branch = String::from_utf8_lossy(&branch.stdout);
