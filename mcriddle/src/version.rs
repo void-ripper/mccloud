@@ -1,6 +1,8 @@
+use std::fmt::Display;
+
 use borsh::{BorshDeserialize, BorshSerialize};
 
-#[derive(BorshDeserialize, BorshSerialize)]
+#[derive(BorshDeserialize, BorshSerialize, Clone)]
 pub struct Version {
     major: u16,
     minor: u16,
@@ -17,8 +19,26 @@ impl Default for Version {
             minor: env!("CARGO_PKG_VERSION_MINOR").parse().unwrap(),
             patch: env!("CARGO_PKG_VERSION_PATCH").parse().unwrap(),
             target: env!("TARGET").into(),
-            branch: "".into(),
-            commit: "".into(),
+            branch: env!("BRANCH").into(),
+            commit: env!("COMMIT").into(),
         }
+    }
+}
+
+impl Eq for Version {}
+
+impl PartialEq for Version {
+    fn eq(&self, o: &Self) -> bool {
+        self.major == o.major && self.minor == o.minor && self.patch == o.patch && self.commit == o.commit
+    }
+}
+
+impl Display for Version {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "v{}.{}.{} {} {} {}",
+            self.major, self.minor, self.patch, self.branch, self.commit, self.target
+        )
     }
 }

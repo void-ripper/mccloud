@@ -101,6 +101,7 @@ type OnCreateCb = dyn Fn(HashMap<SignBytes, Data>) -> Pin<Box<dyn Future<Output 
 pub struct Peer {
     me: Weak<Peer>,
     pub cfg: Config,
+    version: Version,
     prikey: SecretKey,
     pubkey: PubKeyBytes,
     pubhex: String,
@@ -140,6 +141,7 @@ impl Peer {
         let peer = Arc::new_cyclic(|me| Self {
             // let peer = Arc::new(Self {
             me: me.clone(),
+            version: Version::default(),
             prikey,
             pubkey,
             pubhex,
@@ -332,16 +334,22 @@ impl Peer {
             tx_nonce: 0,
         };
 
-        let greeting = {
+        let (myroot, mylast, mycount, greeting) = {
             let blkch = self.blockchain.lock().await;
-            Message::Greeting {
-                pubkey: self.pubkey,
-                listen: self.cfg.addr,
-                root: blkch.root,
-                last: blkch.last,
-                count: blkch.count,
-                thin: self.cfg.thin,
-            }
+            (
+                blkch.root,
+                blkch.last,
+                blkch.count,
+                Message::Greeting {
+                    version: self.version.clone(),
+                    pubkey: self.pubkey,
+                    listen: self.cfg.addr,
+                    root: blkch.root,
+                    last: blkch.last,
+                    count: blkch.count,
+                    thin: self.cfg.thin,
+                },
+            )
         };
 
         ex!(clw.write(&greeting).await, source);
@@ -349,20 +357,38 @@ impl Peer {
         let (nonce, greeting) = ex!(ClientWriter::read(&mut reader, &None).await, source);
 
         if let Message::Greeting {
+            version,
             pubkey,
             listen,
             root,
-            last: _,
+            last,
             count,
             thin,
         } = greeting
         {
+            if self.version != version {
+                return Err(Error::protocol(
+                    line!(),
+                    module_path!(),
+                    "mcriddle versions do not match",
+                ));
+            }
+
+            if myroot.is_some() && root.is_some() && myroot != root {
+                return Err(Error::protocol(
+                    line!(),
+                    module_path!(),
+                    "blockchain root does not match",
+                ));
+            }
+
             tracing::info!(
-                "{} greeting {} {} {}",
+                "{} greeting\n{}\n{}\n{} {}",
                 self.pubhex,
                 hex::encode(pubkey),
+                version,
                 root.as_ref().map(hex::encode).unwrap_or("".into()),
-                count
+                count,
             );
             let shared = clw.shared_secret(&pubkey, &self.prikey);
             let cl = ClientInfo {
@@ -376,14 +402,8 @@ impl Peer {
                 self.known.lock().await.insert(pubkey, SystemTime::now());
             }
 
-            {
-                let blkch = self.blockchain.lock().await;
-
-                if !self.cfg.thin && !thin && root.is_none() && blkch.root.is_none() {
-                    if self.pubkey > pubkey {}
-                } else if blkch.root.is_none() || count > blkch.count {
-                    ex!(cl.write(&Message::RequestBlocks { start: blkch.last }).await, source);
-                }
+            if (myroot.is_none() || count > mycount) && last.is_some() {
+                ex!(cl.write(&Message::RequestBlocks { start: mylast }).await, source);
             }
 
             let pubkey = cl.pubkey;

@@ -12,7 +12,7 @@ use k256::{
 use crate::{
     blockchain::{Block, Data},
     error::{Error, Result},
-    ex, HashBytes, PubKeyBytes, SignBytes,
+    ex, HashBytes, PubKeyBytes, SignBytes, Version,
 };
 
 #[derive(BorshSerialize, BorshDeserialize, Clone)]
@@ -24,6 +24,7 @@ pub enum Message {
         last: Option<HashBytes>,
         count: u64,
         thin: bool,
+        version: Version,
     },
     KeepAlive {
         pubkey: PubKeyBytes,
