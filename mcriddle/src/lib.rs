@@ -65,14 +65,20 @@ pub struct Config {
     pub folder: PathBuf,
     /// The time between keep alive updates.
     pub keep_alive: Duration,
-    /// How long to gather new data until new block is generated.
+    /// How long to gather new data until a new block is generated.
     pub data_gather_time: Duration,
     /// A thin node does not participate in generating new blocks.
     pub thin: bool,
     /// The relationship config to other nodes.
     pub relationship: ConfigRelationship,
-    /// How many candidates are allowed for the next block.
+    /// How many candidates are randomly chosen to be able to create the next block.
     pub next_candidates: u32,
+    /// If all next block candidates are offline, a peer can force a new block to restart the
+    /// network.
+    ///
+    /// **Note:** This could lead to a potential security risk, if all next candidates could be
+    /// identified and forced offline, so an attacker can force a new block via a malitious modified peer.
+    pub forced_restart: bool,
 }
 
 impl Default for Config {
@@ -89,6 +95,7 @@ impl Default for Config {
                 retry: 3,
             },
             next_candidates: 3,
+            forced_restart: false,
         }
     }
 }
@@ -200,10 +207,6 @@ impl Peer {
                 _ = interval.tick() => {
                     if let Err(e) = self.broadcast(msg.clone()).await {
                         tracing::error!("{} {}", self.pubhex, e);
-                    }
-
-                    if !self.is_block_gathering.load(Ordering::SeqCst) && self.check_is_me_next().await {
-                        self.start_block_gathering();
                     }
 
                     self.known.lock().await.retain(|_k, v| {
@@ -480,16 +483,30 @@ impl Peer {
             blkch.cache = ex!(oncb(cache).await, source);
         }
 
-        let next_author = {
+        // blkch.next_authors
+        let (next_author, all_offline) = {
             let mut nexts = Vec::new();
-            let mut k: Vec<PubKeyBytes> = self.known.lock().await.keys().cloned().collect();
+            let known = self.known.lock().await;
+            let mut k: Vec<PubKeyBytes> = known.keys().cloned().collect();
+
+            let mut all_offline = true;
+            for a in blkch.next_authors.iter() {
+                if known.contains_key(a) {
+                    all_offline = false;
+                    break;
+                }
+            }
+
             while !k.is_empty() && nexts.len() < self.cfg.next_candidates as _ {
                 nexts.push(k.swap_remove(rand::random::<usize>() % k.len()));
             }
-            nexts
+
+            (nexts, all_offline)
         };
         let blk = ex!(blkch.create_block(next_author, self.pubkey, &self.prikey), source);
-        ex!(blkch.add_block(blk.clone()), source);
+
+        let force = self.cfg.forced_restart && all_offline;
+        ex!(blkch.add_block(blk.clone(), force), source);
 
         Ok(blk)
     }
@@ -506,7 +523,7 @@ impl Peer {
             }
         }
 
-        if !known.is_empty() && !blkch.cache.is_empty() {
+        if (blkch.root.is_none() || self.cfg.forced_restart) && !known.is_empty() && !blkch.cache.is_empty() {
             let mut known: Vec<PubKeyBytes> = known.keys().cloned().collect();
             known.push(self.pubkey);
             known.sort_unstable();
@@ -602,13 +619,8 @@ impl Peer {
         if let Some(old) = previous {
             // tracing::debug!("{} keep alive {}", self.pubhex, hex::encode(&pubkey));
             let elapsed = old.elapsed().unwrap_or(self.cfg.keep_alive);
-            let delta = if elapsed >= self.cfg.keep_alive {
-                0
-            } else {
-                (self.cfg.keep_alive - elapsed).as_millis()
-            };
 
-            if delta < 50 {
+            if elapsed >= self.cfg.keep_alive {
                 ex!(self.broadcast_except(m, &cl).await, source);
             }
         } else if previous.is_none() {
@@ -660,7 +672,13 @@ impl Peer {
     async fn on_requested_block(&self, block: Block) -> Result<()> {
         tracing::info!("{} got block {}", self.pubhex, hex::encode(block.hash));
 
-        ex!(self.blockchain.lock().await.add_block(block.clone()), source);
+        ex!(
+            self.blockchain
+                .lock()
+                .await
+                .add_block(block.clone(), self.cfg.forced_restart),
+            source
+        );
         if self.last_block_tx.receiver_count() > 0 {
             ex!(self.last_block_tx.send(block), sync);
         }
@@ -678,8 +696,21 @@ impl Peer {
             }
 
             tracing::info!("{} share block {}", self.pubhex, hex::encode(block.hash));
+            let mut all_offline = true;
+            {
+                let known = self.known.lock().await;
+                for a in blkch.next_authors.iter() {
+                    if known.contains_key(a) {
+                        all_offline = false;
+                        break;
+                    }
+                }
+            }
 
-            ex!(blkch.add_block(block.clone()), source);
+            ex!(
+                blkch.add_block(block.clone(), self.cfg.forced_restart && all_offline),
+                source
+            );
         }
 
         ex!(

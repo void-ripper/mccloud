@@ -298,12 +298,12 @@ impl Blockchain {
     }
 
     /// Adds a new block to the block chain.
-    pub fn add_block(&mut self, blk: Block) -> Result<()> {
+    pub fn add_block(&mut self, blk: Block, force: bool) -> Result<()> {
         if self.last != blk.parent {
             return Err(Error::non_child_block(line!(), module_path!(), blk.hash));
         }
 
-        if self.root.is_some() && !self.next_authors.contains(&blk.author) {
+        if !force && self.root.is_some() && !self.next_authors.contains(&blk.author) {
             return Err(Error::unexpected_block_author(
                 line!(),
                 module_path!(),

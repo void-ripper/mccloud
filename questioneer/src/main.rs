@@ -47,6 +47,7 @@ impl App {
                     retry: 3,
                 },
                 next_candidates: 3,
+                forced_restart: true,
             };
             self.port_pool += 1;
 
