@@ -187,5 +187,10 @@ async fn main() {
         .with_state(Arc::new(Mutex::new(app)));
 
     let listener = TcpListener::bind("127.0.0.1:3000").await.unwrap();
-    axum::serve(listener, router).await.unwrap();
+    axum::serve(listener, router)
+        .with_graceful_shutdown(async {
+            let _ = tokio::signal::ctrl_c().await;
+        })
+        .await
+        .unwrap();
 }
