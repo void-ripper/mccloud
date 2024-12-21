@@ -402,7 +402,7 @@ impl Peer {
             );
             let shared = clw.shared_secret(&pubkey, &self.prikey);
             let cl = ClientInfo {
-                addr,
+                // addr,
                 listen,
                 pubkey,
                 writer: Mutex::new(clw),

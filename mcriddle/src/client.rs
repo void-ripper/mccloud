@@ -30,7 +30,7 @@ pub struct ClientWriter {
 }
 
 pub struct ClientInfo {
-    pub addr: SocketAddr,
+    // pub addr: SocketAddr,
     pub listen: SocketAddr,
     pub pubkey: PubKeyBytes,
     pub writer: Mutex<ClientWriter>,
@@ -53,7 +53,7 @@ impl ClientWriter {
         buf.copy_from_slice(&shared);
         self.shared = Some(buf);
 
-        self.shared.clone()
+        self.shared
     }
 
     pub async fn write(&mut self, msg: &Message) -> Result<()> {
