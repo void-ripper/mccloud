@@ -29,7 +29,7 @@ impl Eq for Version {}
 
 impl PartialEq for Version {
     fn eq(&self, o: &Self) -> bool {
-        self.major == o.major && self.minor == o.minor && self.patch == o.patch && self.commit == o.commit
+        self.major == o.major && self.minor == o.minor && self.patch == o.patch
     }
 }
 
