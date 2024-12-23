@@ -1,9 +1,9 @@
 #![doc = include_str!("../../README.md")]
 
-use std::{net::SocketAddr, path::PathBuf, time::Duration};
+use std::{net::SocketAddr, path::PathBuf};
 
 use clap::Parser;
-use mcriddle::{Config, ConfigRelationship};
+use mcriddle::Config;
 
 #[derive(Parser)]
 #[command(author, version, about)]
@@ -30,15 +30,7 @@ async fn main() {
     let cfg = Config {
         addr: SocketAddr::new(args.host.parse().unwrap(), args.port),
         folder: args.data,
-        keep_alive: Duration::from_millis(250),
-        data_gather_time: Duration::from_millis(500),
-        thin: false,
-        relationship: ConfigRelationship {
-            time: Duration::from_millis(30_000),
-            count: 5,
-            retry: 3,
-        },
-        next_candidates: 3,
+        ..Default::default()
     };
     let peer = mcriddle::Peer::new(cfg).unwrap();
 
