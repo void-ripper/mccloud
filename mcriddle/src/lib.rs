@@ -95,7 +95,7 @@ impl Default for Config {
                 retry: 3,
             },
             next_candidates: 3,
-            forced_restart: false,
+            forced_restart: true,
         }
     }
 }
