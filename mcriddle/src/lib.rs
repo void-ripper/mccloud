@@ -25,7 +25,7 @@ use message::Message;
 use tokio::{
     net::{TcpListener, TcpStream},
     select,
-    sync::{broadcast, mpsc, Mutex},
+    sync::{broadcast, mpsc, Mutex, RwLock},
     time,
 };
 pub use version::Version;
@@ -115,7 +115,7 @@ pub struct Peer {
     to_accept: mpsc::Sender<(SocketAddr, u32)>,
     last_block_tx: broadcast::Sender<Block>,
     to_shutdown: broadcast::Sender<bool>,
-    clients: Mutex<Clients>,
+    clients: RwLock<Clients>,
     known: Mutex<HashMap<PubKeyBytes, (u64, SystemTime)>>,
     blockchain: Mutex<Blockchain>,
     on_block_creation: Mutex<Option<Box<OnCreateCb>>>,
@@ -158,7 +158,7 @@ impl Peer {
             to_accept: to_accept_tx,
             last_block_tx,
             to_shutdown,
-            clients: Mutex::new(HashMap::new()),
+            clients: RwLock::new(HashMap::new()),
             known: Mutex::new(HashMap::new()),
             blockchain: Mutex::new(blockchain),
             on_block_creation: Mutex::new(None),
@@ -250,10 +250,10 @@ impl Peer {
             select! {
                 _ = rx_shutdown.recv() => { break; }
                 _ = interval.tick() => {
-                    let current = self.clients.lock().await.len();
+                    let current = self.clients.read().await.len();
 
                     if current < self.cfg.relationship.count as _ {
-                        let keys: Vec<PubKeyBytes> = self.clients.lock().await.keys().cloned().collect();
+                        let keys: Vec<PubKeyBytes> = self.clients.read().await.keys().cloned().collect();
                         ex!(
                             self.broadcast(Message::RequestNeighbours {
                                 count: self.cfg.relationship.count,
@@ -272,7 +272,7 @@ impl Peer {
 
     async fn broadcast_except(&self, msg: Message, except: &Arc<ClientInfo>) -> Result<()> {
         let except = except.pubkey;
-        let cls = self.clients.lock().await;
+        let cls = self.clients.read().await;
         for to in cls.values() {
             if to.pubkey != except {
                 ex!(to.write(&msg).await, source);
@@ -283,7 +283,7 @@ impl Peer {
     }
 
     async fn broadcast(&self, msg: Message) -> Result<()> {
-        let cls = self.clients.lock().await;
+        let cls = self.clients.read().await;
         for to in cls.values() {
             ex!(to.write(&msg).await, source);
         }
@@ -421,7 +421,7 @@ impl Peer {
             let cl = Arc::new(cl);
 
             let cl0 = cl.clone();
-            self.clients.lock().await.insert(pubkey, cl0);
+            self.clients.write().await.insert(pubkey, cl0);
 
             let peer = self.me.upgrade().unwrap();
             let mut rx_shutdown = self.to_shutdown.subscribe();
@@ -431,7 +431,7 @@ impl Peer {
                 loop {
                     select! {
                         _ = rx_shutdown.recv() => {
-                            peer.clients.lock().await.remove(&pubkey);
+                            peer.clients.write().await.remove(&pubkey);
                             return;
                         }
                         msg = ClientWriter::read(&mut reader, &shared) => {
@@ -457,7 +457,7 @@ impl Peer {
                     }
                 }
 
-                peer.clients.lock().await.remove(&pubkey);
+                peer.clients.write().await.remove(&pubkey);
                 // peer.known.lock().await.swap_remove(&pubkey);
 
                 if reconn_cnt > 0 {
@@ -733,7 +733,7 @@ impl Peer {
 
     async fn on_request_neighbours(&self, count: u32, exclude: Vec<PubKeyBytes>, cl: Arc<ClientInfo>) -> Result<()> {
         let possible: Vec<(PubKeyBytes, SocketAddr)> = {
-            let cls = self.clients.lock().await;
+            let cls = self.clients.read().await;
             cls.iter().map(|(k, v)| (*k, v.listen)).collect()
         };
         let mut exclude: HashSet<PubKeyBytes> = exclude.into_iter().collect();
@@ -781,7 +781,7 @@ impl Peer {
         //     neighbours.len(),
         //     to_connect
         // );
-        let cnt = self.clients.lock().await.len();
+        let cnt = self.clients.read().await.len();
         if cnt < self.cfg.relationship.count as _ {
             let to_add = self.cfg.relationship.count as usize - cnt;
             for (_k, n) in neighbours.into_iter().take(to_add) {
@@ -799,7 +799,7 @@ impl Peer {
 
     /// Returns the public keys of the directly connected peers.
     pub async fn client_pubkeys(&self) -> HashSet<PubKeyBytes> {
-        let cl = self.clients.lock().await;
+        let cl = self.clients.read().await;
         cl.keys().cloned().collect()
     }
 
