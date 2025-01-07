@@ -2,9 +2,20 @@
 
 This a simple peer to peer blockchain network.
 
+**Why?**
+
+mcriddle sovles the problem of atomic action and unique data creation in a peer to peer network.
+This project is motivated to have a faster and more energy conservative solution then for,
+example Bitcoins, proof-of-work algorithm.
+
+**What exactly does or provides it?**
+
++ Atomic actions in peer to peer networks.
++ Data storage via a blockchain.
+
 **Features:**
 
-+ Does not waste your electricity, like other algorithms.
++ Does not waste your electricity, like proof-of-work algorithms.
 + Secp256k1 for public and private keys for each node.
 + Nodes communicated via AES-256-CBC.
 + Dynamic block size.
@@ -19,6 +30,7 @@ use mcriddle::{Config, Peer, SignBytes, blockchain::Data};
 let cfg = Config {
   addr: ([127, 0, 0, 1], 29092).into(),
   folder: PathBuf::from("data"),
+  proxy: None,
   keep_alive: Duration::from_millis(1250),
   data_gather_time: Duration::from_millis(750),
   thin: false,
