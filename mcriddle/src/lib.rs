@@ -116,8 +116,8 @@ pub struct Peer {
     last_block_tx: broadcast::Sender<Block>,
     to_shutdown: broadcast::Sender<bool>,
     clients: RwLock<Clients>,
-    known: Mutex<HashMap<PubKeyBytes, (u64, SystemTime)>>,
-    blockchain: Mutex<Blockchain>,
+    known: RwLock<HashMap<PubKeyBytes, (u64, SystemTime)>>,
+    blockchain: RwLock<Blockchain>,
     on_block_creation: Mutex<Option<Box<OnCreateCb>>>,
     is_block_gathering: AtomicBool,
 }
@@ -159,8 +159,8 @@ impl Peer {
             last_block_tx,
             to_shutdown,
             clients: RwLock::new(HashMap::new()),
-            known: Mutex::new(HashMap::new()),
-            blockchain: Mutex::new(blockchain),
+            known: RwLock::new(HashMap::new()),
+            blockchain: RwLock::new(blockchain),
             on_block_creation: Mutex::new(None),
             is_block_gathering: AtomicBool::new(false),
         });
@@ -214,7 +214,7 @@ impl Peer {
                         tracing::error!("{} {}", self.pubhex, e);
                     }
 
-                    self.known.lock().await.retain(|_k, v| {
+                    self.known.write().await.retain(|_k, v| {
                         if let Ok(elapsed) = v.1.elapsed() {
                             elapsed < cutoff
                         } else {
@@ -345,7 +345,7 @@ impl Peer {
         };
 
         let (myroot, mylast, mycount, greeting) = {
-            let blkch = self.blockchain.lock().await;
+            let blkch = self.blockchain.read().await;
             (
                 blkch.root,
                 blkch.last,
@@ -409,7 +409,7 @@ impl Peer {
             };
 
             if !thin {
-                self.known.lock().await.insert(pubkey, (0, SystemTime::now()));
+                self.known.write().await.insert(pubkey, (0, SystemTime::now()));
             }
 
             if (myroot.is_none() || count > mycount) && last.is_some() {
@@ -491,7 +491,7 @@ impl Peer {
         // blkch.next_authors
         let (next_author, all_offline) = {
             let mut nexts = Vec::new();
-            let known = self.known.lock().await;
+            let known = self.known.read().await;
             let mut k: Vec<PubKeyBytes> = known.keys().cloned().collect();
 
             let mut all_offline = true;
@@ -517,8 +517,8 @@ impl Peer {
     }
 
     async fn check_is_me_next(&self) -> bool {
-        let blkch = self.blockchain.lock().await;
-        let known = self.known.lock().await;
+        let blkch = self.blockchain.read().await;
+        let known = self.known.read().await;
 
         for nxt in blkch.next_authors.iter() {
             if known.contains_key(nxt) {
@@ -552,7 +552,7 @@ impl Peer {
                     loop {
                         select! {
                             _ = time::sleep(peer.cfg.data_gather_time) => {
-                                let mut blkch = peer.blockchain.lock().await;
+                                let mut blkch = peer.blockchain.write().await;
                                 if !blkch.cache.is_empty() {
                                     let block = ex!(peer.create_next_block(&mut blkch).await, source);
                                     ex!(
@@ -619,7 +619,7 @@ impl Peer {
         }
 
         // if ex!(m.verify(), source) {
-        match self.known.lock().await.entry(pubkey) {
+        match self.known.write().await.entry(pubkey) {
             Entry::Occupied(mut e) => {
                 if count > e.get().0 || count == 0 {
                     e.insert((count, SystemTime::now()));
@@ -637,7 +637,7 @@ impl Peer {
     }
 
     async fn perform_share(&self, data: Data, cl: Option<Arc<ClientInfo>>) -> Result<()> {
-        let mut blkch = self.blockchain.lock().await;
+        let mut blkch = self.blockchain.write().await;
 
         if let Entry::Vacant(e) = blkch.cache.entry(data.sign) {
             e.insert(data.clone());
@@ -665,7 +665,7 @@ impl Peer {
             self.pubhex,
             start.map(hex::encode).unwrap_or_default()
         );
-        let blk_it = self.blockchain.lock().await.get_blocks(start);
+        let blk_it = self.blockchain.read().await.get_blocks(start);
         for block in blk_it {
             let block = ex!(block, source);
             ex!(cl.write(&Message::RequestedBlock { block }).await, source);
@@ -679,7 +679,7 @@ impl Peer {
 
         ex!(
             self.blockchain
-                .lock()
+                .write()
                 .await
                 .add_block(block.clone(), self.cfg.forced_restart),
             source
@@ -693,7 +693,7 @@ impl Peer {
 
     async fn on_share_block(&self, block: Block, cl: Arc<ClientInfo>) -> Result<()> {
         {
-            let mut blkch = self.blockchain.lock().await;
+            let mut blkch = self.blockchain.write().await;
             let last = blkch.last;
             if last.map(|n| n == block.hash).unwrap_or(false) {
                 // we get the same block again, just ignore it
@@ -703,7 +703,7 @@ impl Peer {
             tracing::info!("{} share block {}", self.pubhex, hex::encode(block.hash));
             let mut all_offline = true;
             {
-                let known = self.known.lock().await;
+                let known = self.known.read().await;
                 for a in blkch.next_authors.iter() {
                     if known.contains_key(a) {
                         all_offline = false;
@@ -805,7 +805,7 @@ impl Peer {
 
     /// Returns all known public keys.
     pub async fn known_pubkeys(&self) -> HashSet<PubKeyBytes> {
-        self.known.lock().await.keys().cloned().collect()
+        self.known.read().await.keys().cloned().collect()
     }
 
     /// Sets a callback that is only called on the peer which creates block.
@@ -845,7 +845,7 @@ impl Peer {
 
     /// Returns an iterator over all blocks, from start to last.
     pub async fn block_iter(&self) -> BlockIterator {
-        self.blockchain.lock().await.get_blocks(None)
+        self.blockchain.read().await.get_blocks(None)
     }
 
     pub fn shutdown(&self) -> Result<()> {
