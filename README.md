@@ -16,6 +16,7 @@ example Bitcoins, proof-of-work algorithm.
 **Features:**
 
 + Does not waste your electricity, like proof-of-work algorithms.
++ 51% attacks are not possible.
 + Secp256k1 for public and private keys for each node.
 + Nodes communicated via AES-256-CBC.
 + Dynamic block size.
