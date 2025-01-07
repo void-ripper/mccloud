@@ -3,7 +3,7 @@
 use std::{net::SocketAddr, path::PathBuf};
 
 use clap::Parser;
-use mcriddle::Config;
+use mcriddle::{Config, IntoTargetAddr};
 
 #[derive(Parser)]
 #[command(author, version, about)]
@@ -35,9 +35,9 @@ async fn main() {
     let peer = mcriddle::Peer::new(cfg).unwrap();
 
     for conn in args.conn.iter() {
-        match conn.parse() {
+        match conn.as_str().into_target_addr() {
             Ok(conn) => {
-                if let Err(e) = peer.connect(conn).await {
+                if let Err(e) = peer.connect(conn.to_owned()).await {
                     tracing::error!("{e}");
                 }
             }

@@ -6,7 +6,7 @@ use axum::{
     Json, Router,
 };
 use indexmap::IndexMap;
-use mcriddle::{Config, Peer};
+use mcriddle::{Config, Peer, TargetAddr};
 use serde::{Deserialize, Serialize};
 use tokio::{net::TcpListener, sync::Mutex};
 
@@ -37,6 +37,7 @@ impl App {
         for _ in 0..count {
             let cfg = Config {
                 addr: ([127, 0, 0, 1], self.port_pool).into(),
+                proxy: None,
                 folder: PathBuf::from("data").join(self.port_pool.to_string()),
                 keep_alive: Duration::from_millis(3_000),
                 data_gather_time: Duration::from_millis(800),
@@ -132,7 +133,7 @@ pub struct ConnData {
 async fn peer_connect(state: AppPtr, Json(conn): Json<ConnData>) {
     let app = state.lock().await;
     if let Some((frm, to)) = app.peers.get(&conn.frm).zip(app.peers.get(&conn.to)) {
-        if let Err(e) = frm.connect(to.cfg.addr).await {
+        if let Err(e) = frm.connect(TargetAddr::Ip(to.cfg.addr)).await {
             tracing::error!("{e}");
         }
     }

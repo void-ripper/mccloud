@@ -1,8 +1,9 @@
 #![doc = include_str!("../../README.md")]
 
 use std::{
+    fmt::Display,
     future::Future,
-    net::SocketAddr,
+    net::{SocketAddr, ToSocketAddrs},
     path::PathBuf,
     pin::Pin,
     sync::{
@@ -28,6 +29,8 @@ use tokio::{
     sync::{broadcast, mpsc, Mutex, RwLock},
     time,
 };
+use tokio_socks::tcp::Socks5Stream;
+pub use tokio_socks::{IntoTargetAddr, TargetAddr};
 pub use version::Version;
 
 pub mod blockchain;
@@ -61,6 +64,8 @@ pub struct ConfigRelationship {
 pub struct Config {
     /// The address the peer is listening on.
     pub addr: SocketAddr,
+    /// A socks proxy. Mostly used via TOR.
+    pub proxy: Option<SocketAddr>,
     /// The data folder where to save the blockchain.
     pub folder: PathBuf,
     /// The time between keep alive updates.
@@ -85,6 +90,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             addr: ([0, 0, 0, 0], 29092).into(),
+            proxy: None,
             folder: "data".into(),
             keep_alive: Duration::from_millis(600),
             data_gather_time: Duration::from_millis(750),
@@ -112,7 +118,7 @@ pub struct Peer {
     prikey: SecretKey,
     pubkey: PubKeyBytes,
     pubhex: String,
-    to_accept: mpsc::Sender<(SocketAddr, u32)>,
+    to_accept: mpsc::Sender<(TargetAddr<'static>, u32)>,
     last_block_tx: broadcast::Sender<Block>,
     to_shutdown: broadcast::Sender<bool>,
     clients: RwLock<Clients>,
@@ -291,25 +297,51 @@ impl Peer {
         Ok(())
     }
 
-    async fn listen(&self, mut to_accept: mpsc::Receiver<(SocketAddr, u32)>) -> Result<()> {
+    async fn listen(&self, mut to_accept: mpsc::Receiver<(TargetAddr<'static>, u32)>) -> Result<()> {
         tracing::info!("{} listen on {}", self.pubhex, self.cfg.addr);
 
         let listener = ex!(TcpListener::bind(self.cfg.addr).await, io);
         let mut rx_shutdown = self.to_shutdown.subscribe();
+
+        async fn accepting<E: Display>(
+            peer: &Peer,
+            addr: TargetAddr<'static>,
+            sck: std::result::Result<TcpStream, E>,
+            reconn_cnt: u32,
+        ) {
+            match sck {
+                Ok(sck) => {
+                    if let Err(e) = peer.accept(addr, sck, reconn_cnt).await {
+                        tracing::error!("{} {}", peer.pubhex, e);
+                    }
+                }
+                Err(e) => {
+                    tracing::error!("{} {}", peer.pubhex, e);
+                }
+            }
+        }
 
         loop {
             select! {
                 _ = rx_shutdown.recv() => { break; }
                 addr = to_accept.recv() => {
                     if let Some((addr, reconn_cnt)) = addr {
-                        match TcpStream::connect(addr).await {
-                            Ok(sck) => {
-                                if let Err(e) = self.accept(addr, sck, reconn_cnt).await {
+                        if let Some(proxy) = self.cfg.proxy {
+                            let res = Socks5Stream::connect(proxy, addr.to_owned()).await;
+                            accepting(self, addr, res.map(|e| e.into_inner()), reconn_cnt).await;
+
+                        }
+                        else {
+                            let raddr = addr.to_socket_addrs()
+                                .map_err(|e| Error::io(line!(), module_path!(), e))
+                                .and_then(|mut x| x.next().ok_or( Error::external(line!(),module_path!() ,"no socket address".into())));
+                            match raddr {
+                                Ok(raddr) => {
+                                    accepting(self, addr, TcpStream::connect(raddr).await, reconn_cnt).await;
+                                }
+                                Err(e) => {
                                     tracing::error!("{} {}", self.pubhex, e);
                                 }
-                            }
-                            Err(e) => {
-                                tracing::error!("{} {}", self.pubhex, e);
                             }
                         }
                     }
@@ -317,9 +349,7 @@ impl Peer {
                 res = listener.accept() => {
                     match res {
                         Ok((sck, addr)) => {
-                            if let Err(e) = self.accept(addr, sck, 0).await {
-                                tracing::error!("{} {}", self.pubhex, e);
-                            }
+                            accepting(self, TargetAddr::Ip(addr).to_owned(), Ok::<_, std::io::Error>(sck), 0).await;
                         }
                         Err(e) => {
                             tracing::error!("{} {}", self.pubhex, e);
@@ -334,8 +364,8 @@ impl Peer {
         Ok(())
     }
 
-    async fn accept(&self, addr: SocketAddr, sck: TcpStream, reconn_cnt: u32) -> Result<()> {
-        tracing::info!("{} accept {}", self.pubhex, addr);
+    async fn accept(&self, addr: TargetAddr<'static>, sck: TcpStream, reconn_cnt: u32) -> Result<()> {
+        tracing::info!("{} accept {:?}", self.pubhex, addr);
 
         let (mut reader, writer) = sck.into_split();
         let mut clw = ClientWriter {
@@ -353,7 +383,7 @@ impl Peer {
                 Message::Greeting {
                     version: self.version.clone(),
                     pubkey: self.pubkey,
-                    listen: self.cfg.addr,
+                    listen: self.cfg.addr.to_string(),
                     root: blkch.root,
                     last: blkch.last,
                     count: blkch.count,
@@ -403,7 +433,7 @@ impl Peer {
             let shared = clw.shared_secret(&pubkey, &self.prikey);
             let cl = ClientInfo {
                 // addr,
-                listen,
+                listen: ex!(listen.into_target_addr(), sync),
                 pubkey,
                 writer: Mutex::new(clw),
             };
@@ -732,15 +762,15 @@ impl Peer {
     }
 
     async fn on_request_neighbours(&self, count: u32, exclude: Vec<PubKeyBytes>, cl: Arc<ClientInfo>) -> Result<()> {
-        let possible: Vec<(PubKeyBytes, SocketAddr)> = {
+        let possible: Vec<(PubKeyBytes, TargetAddr<'static>)> = {
             let cls = self.clients.read().await;
-            cls.iter().map(|(k, v)| (*k, v.listen)).collect()
+            cls.iter().map(|(k, v)| (*k, v.listen.to_owned())).collect()
         };
         let mut exclude: HashSet<PubKeyBytes> = exclude.into_iter().collect();
 
         exclude.insert(cl.pubkey);
 
-        let mut possible: Vec<(PubKeyBytes, SocketAddr)> =
+        let mut possible: Vec<(PubKeyBytes, TargetAddr<'static>)> =
             possible.into_iter().filter(|(k, _)| !exclude.contains(k)).collect();
 
         // let to_exclude: Vec<String> = exclude.iter().map(|x| hex::encode(x)).collect();
@@ -762,6 +792,19 @@ impl Peer {
             to_share.extend(possible.into_iter());
         }
 
+        let to_share: Vec<(PubKeyBytes, String)> = to_share
+            .into_iter()
+            .map(|(a, b)| {
+                (
+                    a,
+                    match b {
+                        TargetAddr::Ip(ip) => ip.to_string(),
+                        TargetAddr::Domain(d, p) => format!("{}:{}", d, p),
+                    },
+                )
+            })
+            .collect();
+
         if !to_share.is_empty() {
             ex!(
                 cl.write(&Message::IntroduceNeighbours { neighbours: to_share }).await,
@@ -772,7 +815,7 @@ impl Peer {
         Ok(())
     }
 
-    async fn on_introduce_neighbours(&self, neighbours: Vec<(PubKeyBytes, SocketAddr)>) -> Result<()> {
+    async fn on_introduce_neighbours(&self, neighbours: Vec<(PubKeyBytes, String)>) -> Result<()> {
         // let to_connect: Vec<String> = neighbours.iter().map(|x| hex::encode(x.0)).collect();
         // let to_connect = to_connect.join("\n");
         // tracing::info!(
@@ -785,7 +828,12 @@ impl Peer {
         if cnt < self.cfg.relationship.count as _ {
             let to_add = self.cfg.relationship.count as usize - cnt;
             for (_k, n) in neighbours.into_iter().take(to_add) {
-                ex!(self.to_accept.send((n, self.cfg.relationship.retry)).await, sync);
+                ex!(
+                    self.to_accept
+                        .send((ex!(n.into_target_addr(), sync), self.cfg.relationship.retry))
+                        .await,
+                    sync
+                );
             }
         }
 
@@ -821,8 +869,8 @@ impl Peer {
     }
 
     /// Try to connect to another peer.
-    pub async fn connect(&self, addr: SocketAddr) -> Result<()> {
-        tracing::info!("{} connect to {}", self.pubhex, addr);
+    pub async fn connect(&self, addr: TargetAddr<'static>) -> Result<()> {
+        tracing::info!("{} connect to {:?}", self.pubhex, addr);
         ex!(self.to_accept.send((addr, self.cfg.relationship.retry)).await, sync);
         Ok(())
     }

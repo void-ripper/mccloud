@@ -1,5 +1,3 @@
-use std::net::SocketAddr;
-
 use aes::cipher::{block_padding::Pkcs7, BlockDecryptMut, BlockEncryptMut, KeyIvInit};
 use k256::{
     ecdh::diffie_hellman,
@@ -12,6 +10,7 @@ use tokio::{
     net::tcp::{OwnedReadHalf, OwnedWriteHalf},
     sync::Mutex,
 };
+use tokio_socks::TargetAddr;
 
 use crate::{
     error::{Error, Result},
@@ -31,7 +30,7 @@ pub struct ClientWriter {
 
 pub struct ClientInfo {
     // pub addr: SocketAddr,
-    pub listen: SocketAddr,
+    pub listen: TargetAddr<'static>,
     pub pubkey: PubKeyBytes,
     pub writer: Mutex<ClientWriter>,
 }
