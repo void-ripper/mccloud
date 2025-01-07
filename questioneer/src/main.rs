@@ -38,7 +38,7 @@ impl App {
             let cfg = Config {
                 addr: ([127, 0, 0, 1], self.port_pool).into(),
                 folder: PathBuf::from("data").join(self.port_pool.to_string()),
-                keep_alive: Duration::from_millis(30_000),
+                keep_alive: Duration::from_millis(3_000),
                 data_gather_time: Duration::from_millis(800),
                 thin,
                 relationship: mcriddle::ConfigRelationship {
@@ -180,10 +180,10 @@ async fn main() {
     let router = Router::new()
         .route("/api/list", get(peer_list))
         .route("/api/create", post(peer_create))
-        .route("/api/shutdown/:pubhex", post(peer_shutdown))
+        .route("/api/shutdown/{pubhex}", post(peer_shutdown))
         .route("/api/share", post(peer_share))
         .route("/api/connect", post(peer_connect))
-        .route("/api/blocks/:pubhex", post(peer_blocks))
+        .route("/api/blocks/{pubhex}", post(peer_blocks))
         .with_state(Arc::new(Mutex::new(app)));
 
     let listener = TcpListener::bind("127.0.0.1:3000").await.unwrap();
