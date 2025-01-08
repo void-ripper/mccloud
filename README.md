@@ -4,9 +4,9 @@ This a simple peer to peer blockchain network.
 
 **Why?**
 
-mcriddle sovles the problem of atomic action and unique data creation in a peer to peer network.
+mcriddle solves the problem of atomic actions and unique data creation in a peer to peer network.
 This project is motivated to have a faster and more energy conservative solution then for,
-example Bitcoins, proof-of-work algorithm.
+example Bitcoins proof-of-work algorithm.
 
 **What exactly does or provides it?**
 
@@ -21,7 +21,8 @@ example Bitcoins, proof-of-work algorithm.
 + Nodes communicated via AES-256-CBC.
 + Dynamic block size.
 + Zstd compressed data blocks.
-+ Uses Borsh for serialization.
++ Uses [Borsh](https://borsh.io/) for fast and secure serialization.
++ Socks5 support for use via TOR.
 
 ## Example
 
@@ -44,6 +45,8 @@ let cfg = Config {
   next_candidates: 3,
 };
 let peer = Peer::new(cfg)?;
+
+peer.connect("127.0.0.1:29093".into_target_addr()?.to_owned()).await?;
 
 peer.set_on_block_creation_cb(|data: HashMap<SignBytes, Data>| Box::pin(async {
   // validate data and/or perform a network atomic actions
