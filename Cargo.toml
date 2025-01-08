@@ -25,4 +25,4 @@ categories = ["concurrency", "network-programming"]
 [workspace]
 resolver = "2"
 members = ["mcriddle", "mcriddle-daemon"]
-exclude = ["chatomato", "questioneer"]
+exclude = ["questioneer"]
