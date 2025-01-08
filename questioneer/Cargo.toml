@@ -3,6 +3,11 @@ name = "questioneer"
 version = "0.1.0"
 edition = "2021"
 
+[profile.release]
+lto = true
+strip = true
+panic = "abort"
+
 [dependencies]
 axum = "0.8.1"
 hex = "0.4.3"

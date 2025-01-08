@@ -23,6 +23,8 @@ use k256::{
     SecretKey,
 };
 use message::Message;
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 use tokio::{
     net::{TcpListener, TcpStream},
     select,
@@ -51,6 +53,7 @@ pub type HashBytes = [u8; 32];
 pub type SignBytes = [u8; 64];
 
 #[derive(Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct ConfigRelationship {
     /// How many connections a node should have.
     pub count: u32,
@@ -61,6 +64,7 @@ pub struct ConfigRelationship {
 }
 
 #[derive(Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct ConfigProxy {
     /// The socks5 proxy to use.
     pub proxy: SocketAddr,
@@ -69,6 +73,7 @@ pub struct ConfigProxy {
 }
 
 #[derive(Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Config {
     /// The address the peer is listening on.
     pub addr: SocketAddr,

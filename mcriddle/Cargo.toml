@@ -9,6 +9,10 @@ repository.workspace = true
 homepage.workspace = true
 readme.workspace = true
 
+[features]
+default = []
+serde = ["dep:serde"]
+
 [dependencies]
 aes = "0.8.4"
 borsh = { version = "1.5.3", features = ["borsh-derive", "derive"] }
@@ -17,6 +21,7 @@ hashbrown = "0.15.2"
 hex = "0.4.3"
 k256 = { version = "0.13.4", features = ["ecdh", "ecdsa"] }
 rand = "0.8.5"
+serde = { version = "1.0.217", features = ["derive"], optional = true }
 tokio = { version = "1.42.0", features = ["full"] }
 tokio-socks = "0.5.2"
 tracing = "0.1.41"
