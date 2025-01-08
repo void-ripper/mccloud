@@ -61,11 +61,19 @@ pub struct ConfigRelationship {
 }
 
 #[derive(Clone)]
+pub struct ConfigProxy {
+    /// The socks5 proxy to use.
+    pub proxy: SocketAddr,
+    /// The address to use, to connect to this peer. For example an onion address.
+    pub announce_by: String,
+}
+
+#[derive(Clone)]
 pub struct Config {
     /// The address the peer is listening on.
     pub addr: SocketAddr,
     /// A socks proxy. Mostly used via TOR.
-    pub proxy: Option<SocketAddr>,
+    pub proxy: Option<ConfigProxy>,
     /// The data folder where to save the blockchain.
     pub folder: PathBuf,
     /// The time between keep alive updates.
@@ -326,8 +334,8 @@ impl Peer {
                 _ = rx_shutdown.recv() => { break; }
                 addr = to_accept.recv() => {
                     if let Some((addr, reconn_cnt)) = addr {
-                        if let Some(proxy) = self.cfg.proxy {
-                            let res = Socks5Stream::connect(proxy, addr.to_owned()).await;
+                        if let Some(proxy) = &self.cfg.proxy {
+                            let res = Socks5Stream::connect(proxy.proxy, addr.to_owned()).await;
                             accepting(self, addr, res.map(|e| e.into_inner()), reconn_cnt).await;
 
                         }
@@ -383,7 +391,11 @@ impl Peer {
                 Message::Greeting {
                     version: self.version.clone(),
                     pubkey: self.pubkey,
-                    listen: self.cfg.addr.to_string(),
+                    listen: if let Some(proxy) = &self.cfg.proxy {
+                        proxy.announce_by.clone()
+                    } else {
+                        self.cfg.addr.to_string()
+                    },
                     root: blkch.root,
                     last: blkch.last,
                     count: blkch.count,
