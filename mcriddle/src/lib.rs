@@ -38,6 +38,7 @@ pub use version::Version;
 pub mod blockchain;
 mod client;
 pub mod error;
+pub mod highlander;
 mod message;
 mod version;
 
@@ -855,6 +856,11 @@ impl Peer {
         }
 
         Ok(())
+    }
+
+    /// Returns the public key.
+    pub fn pubkey(&self) -> PubKeyBytes {
+        self.pubkey.clone()
     }
 
     /// Returns the hex representation of the public key.
