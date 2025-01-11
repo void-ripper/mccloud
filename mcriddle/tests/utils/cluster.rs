@@ -26,19 +26,18 @@ impl Cluster {
     }
 
     pub fn create(&mut self, cnt: usize, thin: bool) -> Vec<Arc<Peer>> {
-        let mut peers = Vec::new();
         let iter: &mut dyn Iterator<Item = Config> = if thin {
             &mut self.client_configs
         } else {
             &mut self.server_configs
         };
 
-        for _ in 0..cnt {
-            if let Some(c) = iter.next() {
-                let p = Peer::new(c).unwrap();
-                peers.push(p.clone());
-                self.fat_peers.push(p);
-            }
+        let peers: Vec<Arc<Peer>> = iter.take(cnt).map(|c| Peer::new(c).unwrap()).collect();
+
+        if thin {
+            self.thin_peers.extend(peers.iter().cloned());
+        } else {
+            self.fat_peers.extend(peers.iter().cloned());
         }
 
         peers

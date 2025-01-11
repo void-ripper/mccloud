@@ -30,6 +30,7 @@ pub struct ClientWriter {
 
 pub struct ClientInfo {
     // pub addr: SocketAddr,
+    pub thin: bool,
     pub listen: TargetAddr<'static>,
     pub pubkey: PubKeyBytes,
     pub writer: Mutex<ClientWriter>,

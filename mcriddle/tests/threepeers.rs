@@ -21,7 +21,7 @@ async fn three_peers() {
     peers[0].connect(p1addr.to_owned()).await.unwrap();
     peers[2].connect(p1addr.to_owned()).await.unwrap();
 
-    tokio::time::sleep(keep_alive).await;
+    tokio::time::sleep(keep_alive * 2).await;
 
     tracing::debug!("-- check all_known --");
 
@@ -54,5 +54,5 @@ async fn three_peers() {
     tokio::time::sleep(Duration::from_millis(200)).await;
 
     cl.shutdown();
-    // cl.cleanup();
+    cl.cleanup();
 }
