@@ -27,43 +27,60 @@ example Bitcoins proof-of-work algorithm.
 ## Example
 
 ```rust
-use mcriddle::{Config, Peer, SignBytes, blockchain::Data};
-
-let cfg = Config {
-  addr: ([127, 0, 0, 1], 29092).into(),
-  folder: PathBuf::from("data"),
-  proxy: None,
-  keep_alive: Duration::from_millis(1250),
-  data_gather_time: Duration::from_millis(750),
-  thin: false,
-  relationship: ConfigRelationship {
-    time: Duration::from_millis(5000),
-    count: 3,
-    retry: 3,
-  },
-  force_restart: true,
-  next_candidates: 3,
+use std::{
+  path::PathBuf,
+  time::Duration,
 };
-let peer = Peer::new(cfg)?;
+use hashbrown::HashMap;
+use mcriddle::{
+  Config,
+  ConfigRelationship,
+  IntoTargetAddr,
+  Peer,
+  SignBytes,
+  blockchain::Data
+};
 
-peer.connect("127.0.0.1:29093".into_target_addr()?.to_owned()).await?;
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+  let cfg = Config {
+    addr: ([127, 0, 0, 1], 29092).into(),
+    folder: PathBuf::from("data"),
+    proxy: None,
+    keep_alive: Duration::from_millis(1250),
+    data_gather_time: Duration::from_millis(750),
+    thin: false,
+    relationship: ConfigRelationship {
+      time: Duration::from_millis(5000),
+      count: 3,
+      retry: 3,
+    },
+    forced_restart: true,
+    next_candidates: 3,
+  };
+  let peer = Peer::new(cfg)?;
 
-peer.set_on_block_creation_cb(|data: HashMap<SignBytes, Data>| Box::pin(async {
-  // validate data and/or perform a network atomic actions
-  Ok(data)
-})).await;
+  peer.connect("127.0.0.1:29093".into_target_addr()?.to_owned()).await?;
 
-let mut receiver = peer.last_block_receiver()
+  peer.set_on_block_creation_cb(|data: HashMap<SignBytes, Data>| Box::pin(async {
+    // validate and/or transform the data and/or perform a network atomic actions
+    Ok(data)
+  })).await;
 
-tokio::spawn(async move {
-  while let Some(block) = receiver.recv().await {
-    for data in block.data.iter() {
-      data.data; // do something with your data
-    } 
-  }
-});
+  let mut receiver = peer.last_block_receiver();
 
-peer.share(b"some bytes to share").await?;
+  tokio::spawn(async move {
+    while let Ok(block) = receiver.recv().await {
+      for data in block.data.iter() {
+        // do something with the new data
+      } 
+    }
+  });
+
+  peer.share(b"some bytes to share".to_vec()).await?;
+
+  Ok(())
+}
 ```
 
 ## Development Requirements
