@@ -192,18 +192,18 @@ impl Peer {
             }
         });
 
+        let p2 = peer.clone();
+        tokio::spawn(async move {
+            if let Err(e) = p2.establish_relationship().await {
+                tracing::error!("{} relationship: {}", p2.pubhex, e);
+            }
+        });
+
         if !peer.cfg.thin {
             let p1 = peer.clone();
             tokio::spawn(async move {
                 if let Err(e) = p1.send_and_check_keepalive().await {
                     tracing::error!("{} keepalive: {}", p1.pubhex, e);
-                }
-            });
-
-            let p2 = peer.clone();
-            tokio::spawn(async move {
-                if let Err(e) = p2.establish_relationship().await {
-                    tracing::error!("{} relationship: {}", p2.pubhex, e);
                 }
             });
 
@@ -451,6 +451,7 @@ impl Peer {
             let shared = clw.shared_secret(&pubkey, &self.prikey);
             let cl = ClientInfo {
                 // addr,
+                thin,
                 listen: ex!(listen.into_target_addr(), sync),
                 pubkey,
                 writer: Mutex::new(clw),
@@ -780,16 +781,21 @@ impl Peer {
     }
 
     async fn on_request_neighbours(&self, count: u32, exclude: Vec<PubKeyBytes>, cl: Arc<ClientInfo>) -> Result<()> {
-        let possible: Vec<(PubKeyBytes, TargetAddr<'static>)> = {
-            let cls = self.clients.read().await;
-            cls.iter().map(|(k, v)| (*k, v.listen.to_owned())).collect()
-        };
         let mut exclude: HashSet<PubKeyBytes> = exclude.into_iter().collect();
-
         exclude.insert(cl.pubkey);
 
-        let mut possible: Vec<(PubKeyBytes, TargetAddr<'static>)> =
-            possible.into_iter().filter(|(k, _)| !exclude.contains(k)).collect();
+        let mut possible: Vec<(PubKeyBytes, TargetAddr<'static>)> = {
+            let cls = self.clients.read().await;
+            cls.iter()
+                .filter_map(|(k, v)| {
+                    if !v.thin && !exclude.contains(k) {
+                        Some((*k, v.listen.to_owned()))
+                    } else {
+                        None
+                    }
+                })
+                .collect()
+        };
 
         // let to_exclude: Vec<String> = exclude.iter().map(|x| hex::encode(x)).collect();
         // let to_exclude = to_exclude.join("\n");
