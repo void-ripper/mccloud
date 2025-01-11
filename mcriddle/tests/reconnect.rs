@@ -20,7 +20,7 @@ async fn reconnect_1() {
         .unwrap();
     tokio::time::sleep(keepalive).await;
 
-    peers[0].shutdown();
+    peers[0].shutdown().unwrap();
     tokio::time::sleep(keepalive * 2).await;
 
     let all_kn_cnt01 = peers[1].known_pubkeys().await.len();
@@ -58,7 +58,7 @@ async fn reconnect_2() {
         .unwrap();
     tokio::time::sleep(keepalive).await;
 
-    peers[1].shutdown();
+    peers[1].shutdown().unwrap();
     tokio::time::sleep(keepalive * 2).await;
 
     tracing::info!("-- get known count --");

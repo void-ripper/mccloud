@@ -32,7 +32,7 @@ async fn three_peers() {
     tokio::time::sleep(gather_time).await;
 
     tracing::debug!("-- shutdown --");
-    peers[2].shutdown();
+    peers[2].shutdown().unwrap();
 
     tokio::time::sleep(keep_alive).await;
 

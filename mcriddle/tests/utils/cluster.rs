@@ -46,11 +46,11 @@ impl Cluster {
 
     pub fn shutdown(&self) {
         for p in &self.thin_peers {
-            p.shutdown();
+            p.shutdown().unwrap();
         }
 
         for p in &self.fat_peers {
-            p.shutdown();
+            p.shutdown().unwrap();
         }
     }
 

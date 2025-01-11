@@ -49,7 +49,7 @@ async fn data_reboot() {
 
     tokio::time::sleep(Duration::from_millis(sleep)).await;
 
-    peers[0].shutdown();
+    peers[0].shutdown().unwrap();
 
     tokio::time::sleep(Duration::from_millis(sleep)).await;
 
@@ -61,9 +61,6 @@ async fn data_reboot() {
 
     tokio::time::sleep(Duration::from_millis(sleep)).await;
 
-    for p in &peers {
-        p.shutdown();
-    }
     cl.shutdown();
     cl.cleanup();
 }

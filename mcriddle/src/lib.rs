@@ -920,7 +920,9 @@ impl Peer {
     }
 
     pub fn shutdown(&self) -> Result<()> {
-        ex!(self.to_shutdown.send(true), sync);
+        if self.to_shutdown.receiver_count() > 0 {
+            ex!(self.to_shutdown.send(true), sync);
+        }
         Ok(())
     }
 }
