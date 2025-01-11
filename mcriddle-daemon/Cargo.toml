@@ -13,8 +13,8 @@ readme.workspace = true
 default = []
 
 [dependencies]
-clap = { version = "4.5.23", features = ["derive"] }
+clap = { version = "4.5.26", features = ["derive"] }
 mcriddle = { path = "../mcriddle" }
-tokio = { version = "1.42.0", features = ["full"] }
+tokio = { version = "1.43.0", features = ["full"] }
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
