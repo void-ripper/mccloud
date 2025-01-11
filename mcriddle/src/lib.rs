@@ -925,4 +925,8 @@ impl Peer {
         }
         Ok(())
     }
+
+    pub fn is_shutdown(&self) -> bool {
+        self.to_shutdown.receiver_count() == 0
+    }
 }

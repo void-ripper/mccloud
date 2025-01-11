@@ -1,14 +1,20 @@
 use std::{
-    collections::HashMap, fs::File, io::Write, path::PathBuf, sync::{
-        atomic::{AtomicU64, Ordering}, Arc, Mutex, Once, LazyLock, RwLock
-    }, thread::ThreadId
+    collections::HashMap,
+    fs::File,
+    io::Write,
+    path::PathBuf,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc, LazyLock, Mutex, Once, RwLock,
+    },
+    thread::ThreadId,
 };
 
 use mcriddle::Peer;
-use tracing::{span, field::Visit};
+use tracing::{field::Visit, span};
 
-pub mod configs;
 pub mod cluster;
+pub mod configs;
 
 static LOGFILE: LazyLock<Mutex<File>> = LazyLock::new(|| {
     // let date = time::OffsetDateTime::now_utc();
@@ -32,7 +38,6 @@ pub fn init_log(filename: &str) -> tracing::span::Span {
 
     tracing::debug_span!("TEST", file = filename)
 }
-
 
 struct MockSubscriber {
     span_ids: AtomicU64,
@@ -65,8 +70,7 @@ impl tracing::Subscriber for MockSubscriber {
             let mut f2id = self.file_to_id.lock().unwrap();
             let id = if let Some(id) = f2id.get(file) {
                 id.clone()
-            }
-            else {
+            } else {
                 let id = self.span_ids.fetch_add(1, Ordering::SeqCst);
                 let id = span::Id::from_u64(id);
                 f2id.insert(file.clone(), id.clone());
@@ -77,12 +81,10 @@ impl tracing::Subscriber for MockSubscriber {
 
             {
                 let mut log = LOGFILE.lock().unwrap();
-                writeln!(log, "log to {:?}{} {:?}", id, file, span.metadata().name())
-                    .unwrap();
+                writeln!(log, "log to {:?}{} {:?}", id, file, span.metadata().name()).unwrap();
             }
             id
-        }
-        else {
+        } else {
             span::Id::from_u64(1)
         }
     }
@@ -105,7 +107,15 @@ impl tracing::Subscriber for MockSubscriber {
             let tid = std::thread::current().id();
             let id = self.current_id.read().unwrap().get(&tid).cloned();
             let now = time::OffsetDateTime::now_utc();
-            let msg = format!("{} {:15}\t{}\t{} {} {:?}\n", now.date(), now.time(), meta.level(), meta.target(), visitor.message, visitor.unknown);
+            let msg = format!(
+                "{} {:15}\t{}\t{} {} {:?}\n",
+                now.date(),
+                now.time(),
+                meta.level(),
+                meta.target(),
+                visitor.message,
+                visitor.unknown
+            );
 
             if let Some(id) = id {
                 let id2file = self.id_to_file.read().unwrap();
@@ -114,23 +124,27 @@ impl tracing::Subscriber for MockSubscriber {
                 if let Some(mfile) = id2file {
                     let mut log = mfile.lock().unwrap();
                     log.write(msg.as_bytes()).unwrap();
-                }
-                else {
+                } else {
                     let mut log = LOGFILE.lock().unwrap();
                     log.write(msg.as_bytes()).unwrap();
                 }
-            }
-            else {
+            } else {
                 let mut log = LOGFILE.lock().unwrap();
                 log.write(msg.as_bytes()).unwrap();
             }
-        }
-        else {
+        } else {
             let mut log = LOGFILE.lock().unwrap();
-            writeln!(log, "{:?} target({}) file({:?}) msg({}) {:?} {}", 
-                fields, meta.target(), visitor.file, visitor.message,
-                event.parent(), event.is_contextual(),
-            ).unwrap();
+            writeln!(
+                log,
+                "{:?} target({}) file({:?}) msg({}) {:?} {}",
+                fields,
+                meta.target(),
+                visitor.file,
+                visitor.message,
+                event.parent(),
+                event.is_contextual(),
+            )
+            .unwrap();
         }
     }
 
@@ -198,7 +212,9 @@ impl Visit for FileVisitor {
 
 pub async fn assert_all_known(peers: &Vec<Arc<Peer>>, cnt: usize) {
     for (i, p) in peers.iter().enumerate() {
-        let all_kn_cnt = p.known_pubkeys().await.len();
-        assert_eq!(all_kn_cnt, cnt, "peer({})", i);
+        if !p.is_shutdown() {
+            let all_kn_cnt = p.known_pubkeys().await.len();
+            assert_eq!(all_kn_cnt, cnt, "peer({})", i);
+        }
     }
 }

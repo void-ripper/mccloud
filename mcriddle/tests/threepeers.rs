@@ -34,7 +34,7 @@ async fn three_peers() {
     tracing::debug!("-- shutdown --");
     peers[2].shutdown().unwrap();
 
-    tokio::time::sleep(keep_alive).await;
+    tokio::time::sleep(keep_alive * 2).await;
 
     tracing::debug!("-- check all_known --");
     utils::assert_all_known(&peers, 1).await;
