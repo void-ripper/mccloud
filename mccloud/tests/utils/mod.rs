@@ -10,7 +10,7 @@ use std::{
     thread::ThreadId,
 };
 
-use mcriddle::Peer;
+use mccloud::Peer;
 use tracing::{field::Visit, span};
 
 pub mod cluster;

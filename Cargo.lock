@@ -624,7 +624,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "mcriddle"
+name = "mccloud"
 version = "0.1.0"
 dependencies = [
  "aes",
@@ -645,11 +645,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "mcriddle-daemon"
+name = "mccloud-daemon"
 version = "0.1.0"
 dependencies = [
  "clap",
- "mcriddle",
+ "mccloud",
  "tokio",
  "tracing",
  "tracing-subscriber",

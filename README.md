@@ -1,10 +1,10 @@
-# mcriddle
+# mccloud
 
 This a simple peer to peer blockchain network.
 
 **Why?**
 
-mcriddle solves the problem of atomic actions and unique data creation in a peer to peer network.
+mccloud solves the problem of atomic actions and unique data creation in a peer to peer network.
 This project is motivated to have a faster and more energy conservative solution then for,
 example Bitcoins proof-of-work algorithm.
 
@@ -32,7 +32,7 @@ use std::{
   time::Duration,
 };
 use hashbrown::HashMap;
-use mcriddle::{
+use mccloud::{
   Config,
   ConfigRelationship,
   IntoTargetAddr,

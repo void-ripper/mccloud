@@ -1,9 +1,9 @@
 [package]
-name = "mcriddle"
+name = "mccloud"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
-description = "A library to work with the mcriddle network."
+description = "A library to work with the mccloud network."
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true

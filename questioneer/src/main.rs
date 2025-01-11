@@ -6,7 +6,7 @@ use axum::{
     Json, Router,
 };
 use indexmap::IndexMap;
-use mcriddle::{Config, Peer, TargetAddr};
+use mccloud::{Config, Peer, TargetAddr};
 use serde::{Deserialize, Serialize};
 use tokio::{net::TcpListener, sync::Mutex};
 
@@ -42,7 +42,7 @@ impl App {
                 keep_alive: Duration::from_millis(3_000),
                 data_gather_time: Duration::from_millis(800),
                 thin,
-                relationship: mcriddle::ConfigRelationship {
+                relationship: mccloud::ConfigRelationship {
                     time: Duration::from_millis(5000),
                     count: 2,
                     retry: 3,

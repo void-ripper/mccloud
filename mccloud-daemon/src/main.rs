@@ -3,7 +3,7 @@
 use std::{net::SocketAddr, path::PathBuf};
 
 use clap::Parser;
-use mcriddle::{Config, IntoTargetAddr};
+use mccloud::{Config, IntoTargetAddr};
 
 #[derive(Parser)]
 #[command(author, version, about)]
@@ -32,7 +32,7 @@ async fn main() {
         folder: args.data,
         ..Default::default()
     };
-    let peer = mcriddle::Peer::new(cfg).unwrap();
+    let peer = mccloud::Peer::new(cfg).unwrap();
 
     for conn in args.conn.iter() {
         match conn.as_str().into_target_addr() {

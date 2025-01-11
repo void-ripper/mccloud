@@ -5,7 +5,7 @@ use std::{
 
 use bytesize::ByteSize;
 use k256::{elliptic_curve::sec1::ToEncodedPoint, SecretKey};
-use mcriddle::{
+use mccloud::{
     highlander::{Game, Highlander},
     PubKeyBytes,
 };
@@ -167,7 +167,7 @@ fn high_number() {
 
     let mut hl = Highlander::new();
     //let num = 1024 * 1024;
-    let num = 1024 ;
+    let num = 1024;
 
     tracing::info!("count: {}", num);
 

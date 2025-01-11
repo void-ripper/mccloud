@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use mcriddle::Config;
+use mccloud::Config;
 
 pub struct ServerConfigs {
     port: u16,
@@ -19,7 +19,7 @@ impl Iterator for ServerConfigs {
         let port = self.port + 29092;
         self.port += 1;
 
-        let mut cfg = Config {
+        let cfg = Config {
             addr: ([127, 0, 0, 1], port).into(),
             folder: format!("data/test{:02}", port).into(),
             ..Default::default()
@@ -46,7 +46,7 @@ impl Iterator for ClientConfigs {
         let port = self.port + 49093;
         self.port += 1;
 
-        let mut cfg = Config {
+        let cfg = Config {
             addr: ([127, 0, 0, 1], port).into(),
             folder: format!("data/client{:02}", port).into(),
             thin: true,

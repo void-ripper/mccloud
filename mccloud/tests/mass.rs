@@ -3,7 +3,7 @@ use std::{
     time::{Duration, SystemTime},
 };
 
-use mcriddle::IntoTargetAddr;
+use mccloud::IntoTargetAddr;
 use utils::cluster::Cluster;
 
 mod utils;
@@ -95,10 +95,10 @@ async fn mass_line_200() {
     mass_testing(200, 30).await;
 }
 
- //#[tokio::test(flavor = "multi_thread")]
- ////#[tokio::test]
- //async fn mass_line_2000() {
- //    let _e = utils::init_log("data/mass_line_2000.log").entered();
- //
- //    mass_testing(2000, 1000).await;
- //}
+//#[tokio::test(flavor = "multi_thread")]
+////#[tokio::test]
+//async fn mass_line_2000() {
+//    let _e = utils::init_log("data/mass_line_2000.log").entered();
+//
+//    mass_testing(2000, 1000).await;
+//}

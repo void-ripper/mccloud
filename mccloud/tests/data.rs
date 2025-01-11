@@ -1,4 +1,4 @@
-use mcriddle::{IntoTargetAddr, Peer};
+use mccloud::{IntoTargetAddr, Peer};
 use std::time::Duration;
 
 mod utils;
