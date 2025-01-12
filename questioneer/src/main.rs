@@ -171,7 +171,7 @@ async fn peer_blocks(state: AppPtr, Path(pubhex): Path<String>) -> Json<Vec<Bloc
 
 #[tokio::main]
 async fn main() {
-    tracing_subscriber::fmt().with_env_filter("mcriddle=debug").init();
+    tracing_subscriber::fmt().with_env_filter("mccloud=debug").init();
 
     let app = App {
         peers: IndexMap::new(),
