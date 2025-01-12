@@ -125,6 +125,13 @@ type OnCreateCb = dyn Fn(HashMap<SignBytes, Data>) -> Pin<Box<dyn Future<Output 
     + Send
     + 'static;
 
+fn target_addr_to_string<'a>(b: TargetAddr<'a>) -> String {
+    match b {
+        TargetAddr::Ip(ip) => ip.to_string(),
+        TargetAddr::Domain(d, p) => format!("{}:{}", d, p),
+    }
+}
+
 pub struct Peer {
     me: Weak<Peer>,
     pub cfg: Config,
@@ -506,10 +513,22 @@ impl Peer {
                     }
                 }
 
+                tracing::debug!(
+                    "{} disconnect\n{}\n{}",
+                    peer.pubhex,
+                    hex::encode(&pubkey),
+                    target_addr_to_string(addr.to_owned())
+                );
                 peer.clients.write().await.remove(&pubkey);
                 // peer.known.lock().await.swap_remove(&pubkey);
 
                 if reconn_cnt > 0 {
+                    tracing::debug!(
+                        "{} attempt reconnect\n{}\n{}",
+                        peer.pubhex,
+                        hex::encode(&pubkey),
+                        target_addr_to_string(addr.to_owned())
+                    );
                     tokio::time::sleep(Duration::from_secs(15)).await;
                     if !peer.to_accept.is_closed() {
                         if let Err(e) = peer.to_accept.send((addr, reconn_cnt - 1)).await {
@@ -813,20 +832,12 @@ impl Peer {
                 to_share.push(m);
             }
         } else {
-            to_share.extend(possible.into_iter());
+            to_share = possible;
         }
 
         let to_share: Vec<(PubKeyBytes, String)> = to_share
             .into_iter()
-            .map(|(a, b)| {
-                (
-                    a,
-                    match b {
-                        TargetAddr::Ip(ip) => ip.to_string(),
-                        TargetAddr::Domain(d, p) => format!("{}:{}", d, p),
-                    },
-                )
-            })
+            .map(|(a, b)| (a, target_addr_to_string(b)))
             .collect();
 
         if !to_share.is_empty() {
@@ -851,13 +862,15 @@ impl Peer {
         let cnt = self.clients.read().await.len();
         if cnt < self.cfg.relationship.count as _ {
             let to_add = self.cfg.relationship.count as usize - cnt;
-            for (_k, n) in neighbours.into_iter().take(to_add) {
-                ex!(
-                    self.to_accept
-                        .send((ex!(n.into_target_addr(), sync), self.cfg.relationship.retry))
-                        .await,
-                    sync
-                );
+            for (k, n) in neighbours.into_iter().take(to_add) {
+                if !self.clients.read().await.contains_key(&k) {
+                    ex!(
+                        self.to_accept
+                            .send((ex!(n.into_target_addr(), sync), self.cfg.relationship.retry))
+                            .await,
+                        sync
+                    );
+                }
             }
         }
 
