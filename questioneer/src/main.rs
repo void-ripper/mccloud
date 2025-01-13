@@ -6,7 +6,7 @@ use axum::{
     Json, Router,
 };
 use indexmap::IndexMap;
-use mccloud::{Config, Peer, TargetAddr};
+use mccloud::{config::{Algorithm, Relationship, Config}, Peer, TargetAddr};
 use serde::{Deserialize, Serialize};
 use tokio::{net::TcpListener, sync::Mutex};
 
@@ -42,13 +42,16 @@ impl App {
                 keep_alive: Duration::from_millis(3_000),
                 data_gather_time: Duration::from_millis(800),
                 thin,
-                relationship: mccloud::ConfigRelationship {
+                relationship: Relationship {
                     time: Duration::from_millis(5000),
+                    reconnect: Duration::from_millis(5000),
                     count: 2,
                     retry: 3,
                 },
-                next_candidates: 3,
-                forced_restart: true,
+                algorithm: Algorithm::Riddle {
+                    next_candidates: 3,
+                    forced_restart: true,
+                }
             };
             self.port_pool += 1;
 

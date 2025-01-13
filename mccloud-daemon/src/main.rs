@@ -3,7 +3,7 @@
 use std::{net::SocketAddr, path::PathBuf};
 
 use clap::Parser;
-use mccloud::{Config, IntoTargetAddr};
+use mccloud::{config::Config, IntoTargetAddr};
 
 #[derive(Parser)]
 #[command(author, version, about)]
