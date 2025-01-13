@@ -2,18 +2,26 @@
 
 This a simple peer to peer blockchain network.
 
-**Why?**
+## Why?
 
 mccloud solves the problem of atomic actions and unique data creation in a peer to peer network.
 This project is motivated to have a faster and more energy conservative solution then for,
 example Bitcoins proof-of-work algorithm.
 
-**What exactly does or provides it?**
+## What exactly does or provides mccloud?
 
 + Atomic actions in peer to peer networks.
 + Data storage via a blockchain.
 
-**Features:**
+## The algorithm
+
+For the algorithm to work at least two peers are needed.
+If the network starts for the first time, the peer with lowest public key
+generates the first block.
+After that, every peer who generates a block, picks the next possible peers
+who are allowed to create the next block.
+
+## Features
 
 + Does not waste your electricity, like proof-of-work algorithms.
 + 51% attacks are not possible.
@@ -33,8 +41,7 @@ use std::{
 };
 use hashbrown::HashMap;
 use mccloud::{
-  Config,
-  ConfigRelationship,
+  config::Config,
   IntoTargetAddr,
   Peer,
   SignBytes,
@@ -46,17 +53,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
   let cfg = Config {
     addr: ([127, 0, 0, 1], 29092).into(),
     folder: PathBuf::from("data"),
-    proxy: None,
-    keep_alive: Duration::from_millis(1250),
-    data_gather_time: Duration::from_millis(750),
-    thin: false,
-    relationship: ConfigRelationship {
-      time: Duration::from_millis(5000),
-      count: 3,
-      retry: 3,
-    },
-    forced_restart: true,
-    next_candidates: 3,
+    ..Default::default(),
   };
   let peer = Peer::new(cfg)?;
 
