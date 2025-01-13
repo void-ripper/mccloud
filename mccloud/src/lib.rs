@@ -3,8 +3,7 @@
 use std::{
     fmt::Display,
     future::Future,
-    net::{SocketAddr, ToSocketAddrs},
-    path::PathBuf,
+    net::ToSocketAddrs,
     pin::Pin,
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -15,6 +14,7 @@ use std::{
 
 use blockchain::{Block, BlockIterator, Blockchain, Data};
 use client::{ClientInfo, ClientWriter};
+use config::{Algorithm, Config};
 use error::ErrorKind;
 pub use error::{Error, Result};
 use hashbrown::{hash_map::Entry, HashMap, HashSet};
@@ -23,8 +23,6 @@ use k256::{
     SecretKey,
 };
 use message::Message;
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
 use tokio::{
     net::{TcpListener, TcpStream},
     select,
@@ -37,6 +35,7 @@ pub use version::Version;
 
 pub mod blockchain;
 mod client;
+pub mod config;
 pub mod error;
 pub mod highlander;
 mod message;
@@ -52,73 +51,6 @@ macro_rules! ex {
 pub type PubKeyBytes = [u8; 33];
 pub type HashBytes = [u8; 32];
 pub type SignBytes = [u8; 64];
-
-#[derive(Clone)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct ConfigRelationship {
-    /// How many connections a node should have.
-    pub count: u32,
-    /// In which time intervals to look for new connections.
-    pub time: Duration,
-    /// How often to retry, after an already established connection is lost.
-    pub retry: u32,
-}
-
-#[derive(Clone)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct ConfigProxy {
-    /// The socks5 proxy to use.
-    pub proxy: SocketAddr,
-    /// The address to use, to connect to this peer. For example an onion address.
-    pub announce_by: String,
-}
-
-#[derive(Clone)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct Config {
-    /// The address the peer is listening on.
-    pub addr: SocketAddr,
-    /// A socks proxy. Mostly used via TOR.
-    pub proxy: Option<ConfigProxy>,
-    /// The data folder where to save the blockchain.
-    pub folder: PathBuf,
-    /// The time between keep alive updates.
-    pub keep_alive: Duration,
-    /// How long to gather new data until a new block is generated.
-    pub data_gather_time: Duration,
-    /// A thin node does not participate in generating new blocks.
-    pub thin: bool,
-    /// The relationship config to other nodes.
-    pub relationship: ConfigRelationship,
-    /// How many candidates are randomly chosen to be able to create the next block.
-    pub next_candidates: u32,
-    /// If all next block candidates are offline, a peer can force a new block to restart the
-    /// network.
-    ///
-    /// **Note:** This could lead to a potential security risk, if all next candidates could be
-    /// identified and forced offline, so an attacker can force a new block via a malitious modified peer.
-    pub forced_restart: bool,
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            addr: ([0, 0, 0, 0], 29092).into(),
-            proxy: None,
-            folder: "data".into(),
-            keep_alive: Duration::from_millis(600),
-            data_gather_time: Duration::from_millis(750),
-            thin: false,
-            relationship: ConfigRelationship {
-                time: Duration::from_secs(10),
-                count: 3,
-                retry: 3,
-            },
-            next_candidates: 3,
-            forced_restart: true,
-        }
-    }
-}
 
 type Clients = HashMap<PubKeyBytes, Arc<ClientInfo>>;
 type OnCreateCb = dyn Fn(HashMap<SignBytes, Data>) -> Pin<Box<dyn Future<Output = Result<HashMap<SignBytes, Data>>> + Send>>
@@ -557,6 +489,10 @@ impl Peer {
         }
 
         // blkch.next_authors
+        let Algorithm::Riddle {
+            next_candidates,
+            forced_restart,
+        } = &self.cfg.algorithm;
         let (next_author, all_offline) = {
             let mut nexts = Vec::new();
             let known = self.known.read().await;
@@ -570,7 +506,7 @@ impl Peer {
                 }
             }
 
-            while !k.is_empty() && nexts.len() < self.cfg.next_candidates as _ {
+            while !k.is_empty() && nexts.len() < *next_candidates as _ {
                 nexts.push(k.swap_remove(rand::random::<usize>() % k.len()));
             }
 
@@ -578,7 +514,7 @@ impl Peer {
         };
         let blk = ex!(blkch.create_block(next_author, self.pubkey, &self.prikey), source);
 
-        let force = self.cfg.forced_restart && all_offline;
+        let force = *forced_restart && all_offline;
         ex!(blkch.add_block(blk.clone(), force), source);
 
         Ok(blk)
@@ -596,7 +532,8 @@ impl Peer {
             }
         }
 
-        if (blkch.root.is_none() || self.cfg.forced_restart) && !known.is_empty() && !blkch.cache.is_empty() {
+        let Algorithm::Riddle { forced_restart, .. } = &self.cfg.algorithm;
+        if (blkch.root.is_none() || *forced_restart) && !known.is_empty() && !blkch.cache.is_empty() {
             let mut known: Vec<PubKeyBytes> = known.keys().cloned().collect();
             known.push(self.pubkey);
             known.sort_unstable();
@@ -745,11 +682,9 @@ impl Peer {
     async fn on_requested_block(&self, block: Block) -> Result<()> {
         tracing::info!("{} got block {}", self.pubhex, hex::encode(block.hash));
 
+        let Algorithm::Riddle { forced_restart, .. } = &self.cfg.algorithm;
         ex!(
-            self.blockchain
-                .write()
-                .await
-                .add_block(block.clone(), self.cfg.forced_restart),
+            self.blockchain.write().await.add_block(block.clone(), *forced_restart),
             source
         );
         if self.last_block_tx.receiver_count() > 0 {
@@ -780,10 +715,8 @@ impl Peer {
                 }
             }
 
-            ex!(
-                blkch.add_block(block.clone(), self.cfg.forced_restart && all_offline),
-                source
-            );
+            let Algorithm::Riddle { forced_restart, .. } = &self.cfg.algorithm;
+            ex!(blkch.add_block(block.clone(), *forced_restart && all_offline), source);
         }
 
         ex!(

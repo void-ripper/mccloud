@@ -2,7 +2,7 @@
 
 use std::{path::PathBuf, sync::Arc};
 
-use mccloud::{Config, Peer};
+use mccloud::{config::Config, Peer};
 
 use crate::utils::configs::{ClientConfigs, ServerConfigs};
 

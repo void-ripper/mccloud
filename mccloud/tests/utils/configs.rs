@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use mccloud::Config;
+use mccloud::config::Config;
 
 pub struct ServerConfigs {
     port: u16,
