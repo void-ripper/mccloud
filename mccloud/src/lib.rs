@@ -9,7 +9,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
         Arc, Weak,
     },
-    time::{Duration, SystemTime},
+    time::SystemTime,
 };
 
 use blockchain::{Block, BlockIterator, Blockchain, Data};
@@ -367,7 +367,7 @@ impl Peer {
                 return Err(Error::protocol(
                     line!(),
                     module_path!(),
-                    "mcriddle versions do not match",
+                    "mccloud versions do not match",
                 ));
             }
 
@@ -461,7 +461,7 @@ impl Peer {
                         hex::encode(&pubkey),
                         target_addr_to_string(addr.to_owned())
                     );
-                    tokio::time::sleep(Duration::from_secs(15)).await;
+                    tokio::time::sleep(peer.cfg.relationship.reconnect).await;
                     if !peer.to_accept.is_closed() {
                         if let Err(e) = peer.to_accept.send((addr, reconn_cnt - 1)).await {
                             tracing::error!("{} {}", peer.pubhex, e);

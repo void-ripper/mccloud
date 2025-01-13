@@ -10,6 +10,8 @@ pub struct Relationship {
     pub count: u32,
     /// In which time intervals to look for new connections.
     pub time: Duration,
+    /// The time interval of attempted reconnects.
+    pub reconnect: Duration,
     /// How often to retry, after an already established connection is lost.
     pub retry: u32,
 }
@@ -69,6 +71,7 @@ impl Default for Config {
             thin: false,
             relationship: Relationship {
                 time: Duration::from_secs(10),
+                reconnect: Duration::from_secs(15),
                 count: 3,
                 retry: 3,
             },
