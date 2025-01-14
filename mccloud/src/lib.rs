@@ -446,7 +446,7 @@ impl Peer {
                 }
 
                 tracing::debug!(
-                    "{} disconnect\n{}\n{}",
+                    "{} disconnect\n{} {}",
                     peer.pubhex,
                     hex::encode(&pubkey),
                     target_addr_to_string(addr.to_owned())
@@ -456,7 +456,7 @@ impl Peer {
 
                 if reconn_cnt > 0 {
                     tracing::debug!(
-                        "{} attempt reconnect\n{}\n{}",
+                        "{} attempt reconnect\n{} {}",
                         peer.pubhex,
                         hex::encode(&pubkey),
                         target_addr_to_string(addr.to_owned())
@@ -623,20 +623,20 @@ impl Peer {
             return Ok(());
         }
 
-        // if ex!(m.verify(), source) {
-        match self.known.write().await.entry(pubkey) {
-            Entry::Occupied(mut e) => {
-                if count > e.get().0 || count == 0 {
+        if ex!(m.verify(), source) {
+            match self.known.write().await.entry(pubkey) {
+                Entry::Occupied(mut e) => {
+                    if count > e.get().0 || count == 0 {
+                        e.insert((count, SystemTime::now()));
+                        ex!(self.broadcast_except(m, &cl).await, source);
+                    }
+                }
+                Entry::Vacant(e) => {
                     e.insert((count, SystemTime::now()));
                     ex!(self.broadcast_except(m, &cl).await, source);
                 }
             }
-            Entry::Vacant(e) => {
-                e.insert((count, SystemTime::now()));
-                ex!(self.broadcast_except(m, &cl).await, source);
-            }
         }
-        // }
 
         Ok(())
     }
