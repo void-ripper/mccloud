@@ -15,7 +15,7 @@ serde = ["dep:serde"]
 
 [dependencies]
 aes = "0.8.4"
-borsh = { version = "1.5.3", features = ["borsh-derive", "derive"] }
+borsh = { version = "1.5.5", features = ["borsh-derive", "derive"] }
 cbc = { version = "0.1.2", features = ["std"] }
 hashbrown = "0.15.2"
 hex = "0.4.3"
