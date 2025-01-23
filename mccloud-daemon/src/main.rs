@@ -12,8 +12,6 @@ struct Args {
     host: String,
     #[arg(long, default_value_t = 29092)]
     port: u16,
-    #[arg(long)]
-    wsport: Option<u16>,
     #[arg(long, default_value = "data")]
     data: PathBuf,
     #[arg(long)]
