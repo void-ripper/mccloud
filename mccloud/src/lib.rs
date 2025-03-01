@@ -507,7 +507,7 @@ impl Peer {
             }
 
             while !k.is_empty() && nexts.len() < *next_candidates as _ {
-                nexts.push(k.swap_remove(rand::random::<usize>() % k.len()));
+                nexts.push(k.swap_remove(rand::random::<u32>() as usize % k.len()));
             }
 
             (nexts, all_offline)
@@ -761,7 +761,7 @@ impl Peer {
         let mut to_share = Vec::new();
         if count < possible.len() as _ {
             while to_share.len() < count as _ {
-                let m = possible.swap_remove(rand::random::<usize>() % possible.len());
+                let m = possible.swap_remove(rand::random::<u32>() as usize % possible.len());
                 to_share.push(m);
             }
         } else {

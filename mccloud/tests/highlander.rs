@@ -4,12 +4,14 @@ use std::{
 };
 
 use bytesize::ByteSize;
-use k256::{elliptic_curve::sec1::ToEncodedPoint, SecretKey};
+use k256::{
+    elliptic_curve::{rand_core::OsRng, sec1::ToEncodedPoint},
+    SecretKey,
+};
 use mccloud::{
     highlander::{Game, Highlander},
     PubKeyBytes,
 };
-use rand::rngs::OsRng;
 use rayon::prelude::*;
 
 mod utils;

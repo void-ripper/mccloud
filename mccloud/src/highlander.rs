@@ -4,11 +4,11 @@ use borsh::{BorshDeserialize, BorshSerialize};
 use hashbrown::HashMap;
 use k256::{
     ecdsa::signature::hazmat::{PrehashSigner, PrehashVerifier},
+    elliptic_curve::rand_core::{OsRng, RngCore},
     schnorr::{Signature, SigningKey, VerifyingKey},
     sha2::{Digest, Sha256},
     SecretKey,
 };
-use rand::{rngs::OsRng, RngCore};
 // use rayon::{
 //     prelude::{ParallelExtend, ParallelIterator},
 //     slice::ParallelSliceMut,

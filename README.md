@@ -53,7 +53,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
   let cfg = Config {
     addr: ([127, 0, 0, 1], 29092).into(),
     folder: PathBuf::from("data"),
-    ..Default::default(),
+    ..Default::default()
   };
   let peer = Peer::new(cfg)?;
 
