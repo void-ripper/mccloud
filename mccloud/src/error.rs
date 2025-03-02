@@ -90,16 +90,6 @@ impl Error {
         }
     }
 
-    pub fn padding<E: Display>(line: u32, module: &str, e: E) -> Self {
-        Self {
-            source: None,
-            kind: ErrorKind::Encryption,
-            line,
-            module: module.into(),
-            msg: Some(e.to_string()),
-        }
-    }
-
     pub fn non_child_block(line: u32, module: &str, hsh: HashBytes) -> Self {
         Self {
             source: None,

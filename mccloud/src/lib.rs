@@ -13,7 +13,7 @@ use std::{
 };
 
 use blockchain::{Block, BlockIterator, Blockchain, Data};
-use client::{ClientInfo, ClientWriter};
+use client::{ClientInfo, ClientReader, ClientWriter};
 use config::{Algorithm, Config};
 use error::ErrorKind;
 pub use error::{Error, Result};
@@ -320,12 +320,12 @@ impl Peer {
     async fn accept(&self, addr: TargetAddr<'static>, sck: TcpStream, reconn_cnt: u32) -> Result<()> {
         tracing::info!("{} accept {:?}", self.pubhex, addr);
 
-        let (mut reader, writer) = sck.into_split();
-        let mut clw = ClientWriter {
-            shared: None,
-            sck: writer,
-            tx_nonce: 0,
-        };
+        let (mut reader, mut writer) = sck.into_split();
+        // let mut clw = ClientWriter {
+        //     shared: None,
+        //     sck: writer,
+        //     tx_nonce: 0,
+        // };
 
         let (myroot, mylast, mycount, greeting) = {
             let blkch = self.blockchain.read().await;
@@ -349,9 +349,9 @@ impl Peer {
             )
         };
 
-        ex!(clw.write(&greeting).await, source);
+        ex!(ClientWriter::write_greeting(&mut writer, &greeting).await, source);
 
-        let (nonce, greeting) = ex!(ClientWriter::read(&mut reader, &None).await, source);
+        let greeting = ex!(ClientReader::read_greeting(&mut reader).await, source);
 
         if let Message::Greeting {
             version,
@@ -387,13 +387,14 @@ impl Peer {
                 root.as_ref().map(hex::encode).unwrap_or("".into()),
                 count,
             );
-            let shared = clw.shared_secret(&pubkey, &self.prikey);
+            let shared = client::shared_secret(&pubkey, &self.prikey);
+            let mut reader = ex!(ClientReader::new(reader, &shared), source);
             let cl = ClientInfo {
                 // addr,
                 thin,
                 listen: ex!(listen.into_target_addr(), sync),
                 pubkey,
-                writer: Mutex::new(clw),
+                writer: Mutex::new(ex!(ClientWriter::new(writer, &shared), source)),
             };
 
             if !thin {
@@ -415,23 +416,17 @@ impl Peer {
             let mut rx_shutdown = self.to_shutdown.subscribe();
 
             tokio::spawn(async move {
-                let mut rx_nonce = nonce;
                 loop {
                     select! {
                         _ = rx_shutdown.recv() => {
                             peer.clients.write().await.remove(&pubkey);
                             return;
                         }
-                        msg = ClientWriter::read(&mut reader, &shared) => {
+                        msg = reader.read() => {
                             match msg {
-                                Ok((nonce, msg)) => {
-                                    if nonce > rx_nonce {
-                                        rx_nonce = nonce;
-                                        if let Err(e) = peer.on_message(msg, cl.clone()).await {
-                                            tracing::error!("{} {}", pubhex, e);
-                                        }
-                                    } else {
-                                        tracing::warn!("{} nonce to low, omit message", pubhex);
+                                Ok(msg) => {
+                                    if let Err(e) = peer.on_message(msg, cl.clone()).await {
+                                        tracing::error!("{} {}", pubhex, e);
                                     }
                                 }
                                 Err(e) => {

@@ -26,7 +26,7 @@ who are allowed to create the next block.
 + Does not waste your electricity, like proof-of-work algorithms.
 + 51% attacks are not possible.
 + Secp256k1 for public and private keys for each node.
-+ Nodes communicated via AES-256-CBC.
++ Nodes communicated via AES-256-GCM-SIV.
 + Dynamic block size.
 + Zstd compressed data blocks.
 + Uses [Borsh](https://borsh.io/) for fast and secure serialization.

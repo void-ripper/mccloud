@@ -1,4 +1,4 @@
-use aes::cipher::{block_padding::Pkcs7, BlockDecryptMut, BlockEncryptMut, KeyIvInit};
+use aes_gcm_siv::{aead::Aead, Aes256GcmSiv, KeyInit, Nonce};
 use k256::{
     ecdh::diffie_hellman,
     elliptic_curve::rand_core::{OsRng, RngCore},
@@ -19,13 +19,16 @@ use crate::{
     HashBytes, PubKeyBytes,
 };
 
-pub type AesCbcEnc = cbc::Encryptor<aes::Aes256>;
-pub type AesCbcDec = cbc::Decryptor<aes::Aes256>;
-
 pub struct ClientWriter {
     pub sck: OwnedWriteHalf,
-    pub shared: Option<HashBytes>,
-    pub tx_nonce: u64,
+    pub aes: Aes256GcmSiv,
+    pub nonce: u64,
+}
+
+pub struct ClientReader {
+    pub sck: OwnedReadHalf,
+    pub aes: Aes256GcmSiv,
+    pub nonce: u64,
 }
 
 pub struct ClientInfo {
@@ -43,79 +46,95 @@ impl ClientInfo {
     }
 }
 
-impl ClientWriter {
-    pub fn shared_secret(&mut self, pubkey: &PubKeyBytes, private_key: &SecretKey) -> Option<HashBytes> {
-        let pubkey = PublicKey::from_sec1_bytes(pubkey).unwrap();
-        let mut shared = Sha256::new();
-        shared.update(diffie_hellman(private_key.to_nonzero_scalar(), pubkey.as_affine()).raw_secret_bytes());
-        let shared = shared.finalize().to_vec();
-        let mut buf: [u8; 32] = [0u8; 32];
-        buf.copy_from_slice(&shared);
-        self.shared = Some(buf);
+pub fn shared_secret(pubkey: &PubKeyBytes, private_key: &SecretKey) -> HashBytes {
+    let pubkey = PublicKey::from_sec1_bytes(pubkey).unwrap();
+    let mut shared = Sha256::new();
+    shared.update(diffie_hellman(private_key.to_nonzero_scalar(), pubkey.as_affine()).raw_secret_bytes());
+    let shared = shared.finalize().to_vec();
+    let mut buf: [u8; 32] = [0u8; 32];
+    buf.copy_from_slice(&shared);
+    buf
+}
 
-        self.shared
+impl ClientWriter {
+    pub fn new(sck: OwnedWriteHalf, shared: &HashBytes) -> Result<Self> {
+        let aes = ex!(Aes256GcmSiv::new_from_slice(shared), encrypt);
+        Ok(Self { sck, aes, nonce: 1 })
     }
 
-    pub async fn write(&mut self, msg: &Message) -> Result<()> {
+    pub async fn write_greeting(sck: &mut OwnedWriteHalf, msg: &Message) -> Result<()> {
         let data = ex!(borsh::to_vec(msg), io);
-        self.tx_nonce += 1;
-        let nonce = self.tx_nonce;
-        let nonce_bytes = nonce.to_le_bytes();
-
-        if let Some(shared) = &self.shared {
-            let mut iv = [0u8; 16];
-            OsRng.fill_bytes(&mut iv);
-            let enc = ex!(AesCbcEnc::new_from_slices(shared, &iv), encrypt);
-            let data = [&nonce_bytes, data.as_slice()].concat();
-            let encrypted = enc.encrypt_padded_vec_mut::<Pkcs7>(&data);
-
-            let size = (encrypted.len() as u32).to_le_bytes();
-            ex!(self.sck.write(&size).await, io);
-            ex!(self.sck.write(&iv).await, io);
-            ex!(self.sck.write_all(&encrypted).await, io);
-        } else {
-            let size = (data.len() as u32).to_le_bytes();
-            ex!(self.sck.write(&size).await, io);
-            ex!(self.sck.write(&nonce_bytes).await, io);
-            ex!(self.sck.write_all(&data).await, io);
-        }
+        let size = (data.len() as u32).to_le_bytes();
+        ex!(sck.write(&size).await, io);
+        ex!(sck.write_all(&data).await, io);
 
         Ok(())
     }
 
-    pub async fn read(sck: &mut OwnedReadHalf, shared: &Option<HashBytes>) -> Result<(u64, Message)> {
+    pub async fn write(&mut self, msg: &Message) -> Result<()> {
+        let data = ex!(borsh::to_vec(msg), io);
+
+        let mut iv = [0u8; 12];
+        OsRng.fill_bytes(&mut iv);
+        let iv = Nonce::from_slice(&iv);
+
+        let nonce = self.nonce.to_le_bytes();
+        self.nonce += 1;
+
+        let encrypted = ex!(self.aes.encrypt(&iv, data.as_ref()), encrypt);
+
+        let size = (encrypted.len() as u32).to_le_bytes();
+        ex!(self.sck.write(&size).await, io);
+        ex!(self.sck.write(&iv).await, io);
+        ex!(self.sck.write(&nonce).await, io);
+        ex!(self.sck.write_all(&encrypted).await, io);
+
+        Ok(())
+    }
+}
+
+impl ClientReader {
+    pub fn new(sck: OwnedReadHalf, shared: &HashBytes) -> Result<Self> {
+        let aes = ex!(Aes256GcmSiv::new_from_slice(shared), encrypt);
+        Ok(Self { sck, aes, nonce: 1 })
+    }
+
+    pub async fn read_greeting(sck: &mut OwnedReadHalf) -> Result<Message> {
         let mut size_bytes = [0u8; 4];
 
         ex!(sck.read_exact(&mut size_bytes).await, io);
         let size = u32::from_le_bytes(size_bytes);
 
-        let (nonce, data) = if let Some(shared) = &shared {
-            let mut iv = [0u8; 16];
-            ex!(sck.read_exact(&mut iv).await, io);
+        let mut data = vec![0u8; size as usize];
+        ex!(sck.read_exact(&mut data).await, io);
 
-            let mut data = vec![0u8; size as usize];
-            ex!(sck.read_exact(&mut data).await, io);
+        Ok(ex!(borsh::from_slice(&data), io))
+    }
 
-            let dec = ex!(AesCbcDec::new_from_slices(shared, &iv), encrypt);
-            let data: Vec<u8> = ex!(dec.decrypt_padded_vec_mut::<Pkcs7>(&data), padding);
+    pub async fn read(&mut self) -> Result<Message> {
+        let mut size_bytes = [0u8; 4];
 
-            let (nonce, data) = data.split_at(8);
-            let mut nonce_bytes = [0u8; 8];
-            nonce_bytes.copy_from_slice(nonce);
-            let nonce = u64::from_le_bytes(nonce_bytes);
+        ex!(self.sck.read_exact(&mut size_bytes).await, io);
+        let size = u32::from_le_bytes(size_bytes);
 
-            (nonce, data.to_vec())
-        } else {
-            let mut nonce_bytes = [0u8; 8];
-            ex!(sck.read_exact(&mut nonce_bytes).await, io);
-            let nonce = u64::from_le_bytes(nonce_bytes);
+        let mut iv = [0u8; 12];
+        ex!(self.sck.read_exact(&mut iv).await, io);
 
-            let mut data = vec![0u8; size as usize];
-            ex!(sck.read_exact(&mut data).await, io);
+        let mut nonce_bytes = [0u8; 8];
+        ex!(self.sck.read_exact(&mut nonce_bytes).await, io);
+        let nonce = u64::from_le_bytes(nonce_bytes);
 
-            (nonce, data)
-        };
+        let mut data = vec![0u8; size as usize];
+        ex!(self.sck.read_exact(&mut data).await, io);
 
-        Ok((nonce, ex!(borsh::from_slice(&data), io)))
+        if self.nonce >= nonce {
+            return Err(Error::protocol(line!(), module_path!(), "nonce to low"));
+        }
+
+        self.nonce = nonce;
+
+        let plain = ex!(self.aes.decrypt(Nonce::from_slice(&iv), data.as_ref()), encrypt);
+
+        Ok(ex!(borsh::from_slice(&plain), io))
     }
 }
