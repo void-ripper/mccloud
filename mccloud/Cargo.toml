@@ -15,13 +15,13 @@ serde = ["dep:serde"]
 
 [dependencies]
 aes-gcm-siv = "0.11.1"
-borsh = { version = "1.5.5", features = ["borsh-derive", "derive"] }
-hashbrown = "0.15.2"
+borsh = { version = "1.5.7", features = ["borsh-derive", "derive"] }
+hashbrown = "0.15.3"
 hex = "0.4.3"
 k256 = { version = "0.13.4", features = ["ecdh", "ecdsa"] }
-rand = "0.9.0"
-serde = { version = "1.0.218", features = ["derive"], optional = true }
-tokio = { version = "1.43.0", features = ["full"] }
+rand = "0.9.1"
+serde = { version = "1.0.219", features = ["derive"], optional = true }
+tokio = { version = "1.45.0", features = ["full"] }
 tokio-socks = "0.5.2"
 tracing = "0.1.41"
 zstd = "0.13.3"
@@ -29,4 +29,4 @@ zstd = "0.13.3"
 [dev-dependencies]
 bytesize = "2.0.1"
 rayon = "1.10.0"
-time = "0.3.37"
+time = "0.3.41"
