@@ -96,7 +96,7 @@ impl ClientWriter {
 impl ClientReader {
     pub fn new(sck: OwnedReadHalf, shared: &HashBytes) -> Result<Self> {
         let aes = ex!(Aes256GcmSiv::new_from_slice(shared), encrypt);
-        Ok(Self { sck, aes, nonce: 1 })
+        Ok(Self { sck, aes, nonce: 0 })
     }
 
     pub async fn read_greeting(sck: &mut OwnedReadHalf) -> Result<Message> {
