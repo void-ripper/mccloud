@@ -29,7 +29,7 @@ async fn reconnect_1() {
 
     peers[0] = Peer::new(peers[0].cfg.clone()).unwrap();
 
-    tokio::time::sleep(Duration::from_secs(20)).await;
+    tokio::time::sleep(Duration::from_secs(3)).await;
 
     let all_kn_cnt00 = peers[0].known_pubkeys().await.len();
     let all_kn_cnt01 = peers[1].known_pubkeys().await.len();

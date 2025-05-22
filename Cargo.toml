@@ -5,7 +5,7 @@ opt-level = 1
 [profile.release]
 strip = true
 lto = true
-opt-level = 3
+panic = "abort"
 
 [profile.release.build-override]
 strip = true

@@ -29,7 +29,7 @@ async fn mass_testing(cnt: usize, seed: u16) {
     let mut check = HashMap::new();
 
     while !all_connected && tries > 0 {
-        tokio::time::sleep(keepalive * 3).await;
+        tokio::time::sleep(keepalive * 2).await;
         tracing::info!("-- check all connected --");
         check.clear();
         all_connected = true;
@@ -87,7 +87,7 @@ async fn mass_line_20() {
     mass_testing(20, 10).await;
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 16)]
 // #[tokio::test]
 async fn mass_line_200() {
     let _e = utils::init_log("data/mass_line_200.log").entered();

@@ -66,7 +66,7 @@ impl Default for Config {
             addr: ([0, 0, 0, 0], 29092).into(),
             proxy: None,
             folder: "data".into(),
-            keep_alive: Duration::from_millis(600),
+            keep_alive: Duration::from_millis(1900),
             data_gather_time: Duration::from_millis(750),
             thin: false,
             relationship: Relationship {

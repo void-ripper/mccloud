@@ -156,9 +156,9 @@ impl Peer {
     }
 
     async fn send_and_check_keepalive(&self) -> Result<()> {
-        let mut interval = time::interval(self.cfg.keep_alive);
+        let mut interval = time::interval(self.cfg.keep_alive / 2);
         let mut rx_shutdown = self.to_shutdown.subscribe();
-        let cutoff = self.cfg.keep_alive + self.cfg.keep_alive / 2;
+        let cutoff = self.cfg.keep_alive;
         let mut count = 1;
 
         loop {
@@ -192,7 +192,7 @@ impl Peer {
         loop {
             select! {
                 _ = rx_shutdown.recv() => { break; }
-                _ = time::sleep(self.cfg.keep_alive) => {
+                _ = time::sleep(self.cfg.data_gather_time) => {
                     if !self.is_block_gathering.load(Ordering::SeqCst) && self.check_is_me_next().await {
                         self.start_block_gathering();
                     }
