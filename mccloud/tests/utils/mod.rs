@@ -210,6 +210,7 @@ impl Visit for FileVisitor {
     }
 }
 
+#[allow(dead_code)]
 pub async fn assert_all_known(peers: &Vec<Arc<Peer>>, cnt: usize) {
     for (i, p) in peers.iter().enumerate() {
         if !p.is_shutdown() {
