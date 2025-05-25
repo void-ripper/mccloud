@@ -16,12 +16,11 @@ async fn three_peers() {
     tracing::debug!("-- connect clients --");
 
     let p1addr = peers[1].cfg.addr.into_target_addr().unwrap();
-    let keep_alive = peers[0].cfg.keep_alive;
     let gather_time = peers[0].cfg.data_gather_time;
     peers[0].connect(p1addr.to_owned()).await.unwrap();
     peers[2].connect(p1addr.to_owned()).await.unwrap();
 
-    tokio::time::sleep(keep_alive * 2).await;
+    tokio::time::sleep(Duration::from_millis(200)).await;
 
     tracing::debug!("-- check all_known --");
 
@@ -34,7 +33,7 @@ async fn three_peers() {
     tracing::debug!("-- shutdown --");
     peers[2].shutdown().unwrap();
 
-    tokio::time::sleep(keep_alive * 2).await;
+    tokio::time::sleep(Duration::from_millis(200)).await;
 
     tracing::debug!("-- check all_known --");
     utils::assert_all_known(&peers, 1).await;
@@ -46,7 +45,7 @@ async fn three_peers() {
     peers[2] = Peer::new(peers[2].cfg.clone()).unwrap();
     peers[2].connect(p1addr).await.unwrap();
 
-    tokio::time::sleep(keep_alive).await;
+    tokio::time::sleep(Duration::from_millis(200)).await;
 
     tracing::debug!("-- check all_known --");
     utils::assert_all_known(&peers, 2).await;

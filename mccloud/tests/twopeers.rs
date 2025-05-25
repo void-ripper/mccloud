@@ -18,7 +18,7 @@ async fn two_peers() {
     peers[1].connect(addr.to_owned()).await.unwrap();
     clients[0].connect(addr.to_owned()).await.unwrap();
 
-    tokio::time::sleep(peers[0].cfg.keep_alive * 2).await;
+    tokio::time::sleep(Duration::from_millis(200)).await;
 
     utils::assert_all_known(&peers, 1).await;
 

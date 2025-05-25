@@ -39,7 +39,6 @@ impl App {
                 addr: ([127, 0, 0, 1], self.port_pool).into(),
                 proxy: None,
                 folder: PathBuf::from("data").join(self.port_pool.to_string()),
-                keep_alive: Duration::from_millis(3_000),
                 data_gather_time: Duration::from_millis(800),
                 thin,
                 relationship: Relationship {
@@ -174,7 +173,7 @@ async fn peer_blocks(state: AppPtr, Path(pubhex): Path<String>) -> Json<Vec<Bloc
 
 #[tokio::main]
 async fn main() {
-    tracing_subscriber::fmt().with_env_filter("mccloud=debug").init();
+    tracing_subscriber::fmt().with_env_filter("info,mccloud=debug").init();
 
     let app = App {
         peers: IndexMap::new(),

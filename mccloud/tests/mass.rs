@@ -20,16 +20,15 @@ async fn mass_testing(cnt: usize, seed: u16) {
         let p1 = &peers[i];
 
         p1.connect(p0.cfg.addr.into_target_addr().unwrap()).await.unwrap();
-        tokio::time::sleep(Duration::from_millis(10)).await;
+        tokio::time::sleep(Duration::from_millis(50)).await;
     }
 
-    let keepalive = peers[0].cfg.keep_alive;
     let mut tries = 5;
     let mut all_connected = false;
     let mut check = HashMap::new();
 
     while !all_connected && tries > 0 {
-        tokio::time::sleep(keepalive * 2).await;
+        tokio::time::sleep(Duration::from_millis(400)).await;
         tracing::info!("-- check all connected --");
         check.clear();
         all_connected = true;
@@ -95,6 +94,13 @@ async fn mass_line_200() {
     mass_testing(200, 30).await;
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 32)]
+// #[tokio::test]
+async fn mass_line_1000() {
+    let _e = utils::init_log("data/mass_line_1000.log").entered();
+
+    mass_testing(1000, 240).await;
+}
 //#[tokio::test(flavor = "multi_thread")]
 ////#[tokio::test]
 //async fn mass_line_2000() {

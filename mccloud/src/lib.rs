@@ -75,7 +75,7 @@ pub struct Peer {
     last_block_tx: broadcast::Sender<Block>,
     to_shutdown: broadcast::Sender<bool>,
     clients: RwLock<Clients>,
-    known: RwLock<HashMap<PubKeyBytes, (u64, SystemTime)>>,
+    known: RwLock<HashSet<PubKeyBytes>>,
     blockchain: RwLock<Blockchain>,
     on_block_creation: Mutex<Option<Box<OnCreateCb>>>,
     is_block_gathering: AtomicBool,
@@ -118,7 +118,7 @@ impl Peer {
             last_block_tx,
             to_shutdown,
             clients: RwLock::new(HashMap::new()),
-            known: RwLock::new(HashMap::new()),
+            known: RwLock::new(HashSet::new()),
             blockchain: RwLock::new(blockchain),
             on_block_creation: Mutex::new(None),
             is_block_gathering: AtomicBool::new(false),
@@ -139,13 +139,6 @@ impl Peer {
         });
 
         if !peer.cfg.thin {
-            let p1 = peer.clone();
-            tokio::spawn(async move {
-                if let Err(e) = p1.send_and_check_keepalive().await {
-                    tracing::error!("{} keepalive: {}", p1.pubhex, e);
-                }
-            });
-
             let p3 = peer.clone();
             tokio::spawn(async move {
                 p3.check_for_block_gathering().await;
@@ -153,37 +146,6 @@ impl Peer {
         }
 
         Ok(peer)
-    }
-
-    async fn send_and_check_keepalive(&self) -> Result<()> {
-        let mut interval = time::interval(self.cfg.keep_alive / 2);
-        let mut rx_shutdown = self.to_shutdown.subscribe();
-        let cutoff = self.cfg.keep_alive;
-        let mut count = 1;
-
-        loop {
-            select! {
-                _ = rx_shutdown.recv() => { break; }
-                _ = interval.tick() => {
-                    let msg = Message::keepalive(&self.pubkey, &self.prikey, count);
-                    let (nxt, _overflow) = count.overflowing_add(1) ;
-                    count = nxt;
-
-                    if let Err(e) = self.broadcast(msg.clone()).await {
-                        tracing::error!("{} {}", self.pubhex, e);
-                    }
-
-                    self.known.write().await.retain(|_k, v| {
-                        if let Ok(elapsed) = v.1.elapsed() {
-                            elapsed < cutoff
-                        } else {
-                            false
-                        }
-                    });
-                }
-            }
-        }
-        Ok(())
     }
 
     async fn check_for_block_gathering(&self) {
@@ -345,6 +307,7 @@ impl Peer {
                     last: blkch.last,
                     count: blkch.count,
                     thin: self.cfg.thin,
+                    known: self.known.read().await.iter().cloned().collect(),
                 },
             )
         };
@@ -361,6 +324,7 @@ impl Peer {
             last,
             count,
             thin,
+            known,
         } = greeting
         {
             if self.version != version {
@@ -398,11 +362,26 @@ impl Peer {
             };
 
             if !thin {
-                self.known.write().await.insert(pubkey, (0, SystemTime::now()));
-            }
+                let new = {
+                    let mut k = self.known.write().await;
+                    let new = k.insert(pubkey);
 
-            if (myroot.is_none() || count > mycount) && last.is_some() {
-                ex!(cl.write(&Message::RequestBlocks { start: mylast }).await, source);
+                    k.extend(&known);
+                    k.remove(&self.pubkey);
+
+                    new
+                };
+
+                if new {
+                    ex!(self.broadcast(Message::Announce { pubkey }).await, source);
+                }
+                for new in known {
+                    ex!(self.broadcast(Message::Announce { pubkey: new }).await, source);
+                }
+
+                if (myroot.is_none() || count > mycount) && last.is_some() {
+                    ex!(cl.write(&Message::RequestBlocks { start: mylast }).await, source);
+                }
             }
 
             let pubkey = cl.pubkey;
@@ -462,6 +441,10 @@ impl Peer {
                             tracing::error!("{} {}", peer.pubhex, e);
                         }
                     }
+                } else {
+                    if let Err(e) = peer.broadcast(Message::Leave { pubkey }).await {
+                        tracing::error!("{} sent leave: {}", peer.pubhex, e);
+                    }
                 }
             });
         } else {
@@ -491,11 +474,11 @@ impl Peer {
         let (next_author, all_offline) = {
             let mut nexts = Vec::new();
             let known = self.known.read().await;
-            let mut k: Vec<PubKeyBytes> = known.keys().cloned().collect();
+            let mut k: Vec<PubKeyBytes> = known.iter().cloned().collect();
 
             let mut all_offline = true;
             for a in blkch.next_authors.iter() {
-                if known.contains_key(a) {
+                if known.contains(a) {
                     all_offline = false;
                     break;
                 }
@@ -520,7 +503,7 @@ impl Peer {
         let known = self.known.read().await;
 
         for nxt in blkch.next_authors.iter() {
-            if known.contains_key(nxt) {
+            if known.contains(nxt) {
                 return false;
             } else if *nxt == self.pubkey {
                 return true;
@@ -529,7 +512,7 @@ impl Peer {
 
         let Algorithm::Riddle { forced_restart, .. } = &self.cfg.algorithm;
         if (blkch.root.is_none() || *forced_restart) && !known.is_empty() && !blkch.cache.is_empty() {
-            let mut known: Vec<PubKeyBytes> = known.keys().cloned().collect();
+            let mut known: Vec<PubKeyBytes> = known.iter().cloned().collect();
             known.push(self.pubkey);
             known.sort_unstable();
 
@@ -587,9 +570,6 @@ impl Peer {
             Message::Greeting { .. } => {
                 tracing::error!("{} we should never get a second greeting", self.pubhex);
             }
-            m @ Message::KeepAlive { pubkey, count, .. } => {
-                ex!(self.on_keepalive(pubkey, count, m, cl).await, source);
-            }
             Message::ShareData { data } => {
                 ex!(self.on_share_data(data, cl).await, source);
             }
@@ -608,28 +588,11 @@ impl Peer {
             Message::IntroduceNeighbours { neighbours } => {
                 ex!(self.on_introduce_neighbours(neighbours).await, source);
             }
-        }
-
-        Ok(())
-    }
-
-    async fn on_keepalive(&self, pubkey: PubKeyBytes, count: u64, m: Message, cl: Arc<ClientInfo>) -> Result<()> {
-        if pubkey == self.pubkey {
-            return Ok(());
-        }
-
-        if ex!(m.verify(), source) {
-            match self.known.write().await.entry(pubkey) {
-                Entry::Occupied(mut e) => {
-                    if count > e.get().0 || count == 0 {
-                        e.insert((count, SystemTime::now()));
-                        ex!(self.broadcast_except(m, &cl).await, source);
-                    }
-                }
-                Entry::Vacant(e) => {
-                    e.insert((count, SystemTime::now()));
-                    ex!(self.broadcast_except(m, &cl).await, source);
-                }
+            Message::Announce { pubkey } => {
+                ex!(self.on_announce(pubkey, cl).await, source);
+            }
+            Message::Leave { pubkey } => {
+                ex!(self.on_leave(pubkey, cl).await, source);
             }
         }
 
@@ -703,7 +666,7 @@ impl Peer {
             {
                 let known = self.known.read().await;
                 for a in blkch.next_authors.iter() {
-                    if known.contains_key(a) {
+                    if known.contains(a) {
                         all_offline = false;
                         break;
                     }
@@ -805,6 +768,30 @@ impl Peer {
         Ok(())
     }
 
+    async fn on_announce(&self, pubkey: PubKeyBytes, cl: Arc<ClientInfo>) -> Result<()> {
+        if self.pubkey != pubkey {
+            let new = self.known.write().await.insert(pubkey);
+
+            if new {
+                ex!(self.broadcast_except(Message::Announce { pubkey }, &cl).await, source);
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn on_leave(&self, pubkey: PubKeyBytes, cl: Arc<ClientInfo>) -> Result<()> {
+        if self.pubkey != pubkey {
+            let known = self.known.write().await.remove(&pubkey);
+
+            if known {
+                ex!(self.broadcast_except(Message::Leave { pubkey }, &cl).await, source);
+            }
+        }
+
+        Ok(())
+    }
+
     /// Returns the public key.
     pub fn pubkey(&self) -> PubKeyBytes {
         self.pubkey.clone()
@@ -823,7 +810,7 @@ impl Peer {
 
     /// Returns all known public keys.
     pub async fn known_pubkeys(&self) -> HashSet<PubKeyBytes> {
-        self.known.read().await.keys().cloned().collect()
+        self.known.read().await.clone()
     }
 
     /// Sets a callback that is only called on the peer which creates block.

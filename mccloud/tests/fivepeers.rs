@@ -12,9 +12,9 @@ async fn five_peers() {
     let three = cl.create(3, false);
     let two = cl.create(2, false);
 
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    let time = Duration::from_millis(250);
 
-    let keepalive = three[0].cfg.keep_alive;
+    tokio::time::sleep(time).await;
 
     three[0]
         .connect(three[1].cfg.addr.into_target_addr().unwrap())
@@ -30,7 +30,7 @@ async fn five_peers() {
         .await
         .unwrap();
 
-    tokio::time::sleep(keepalive).await;
+    tokio::time::sleep(time).await;
 
     utils::assert_all_known(&three, 2).await;
     utils::assert_all_known(&two, 1).await;
@@ -44,7 +44,7 @@ async fn five_peers() {
     five.extend(three.iter().cloned());
     five.extend(two.iter().cloned());
 
-    tokio::time::sleep(keepalive).await;
+    tokio::time::sleep(time).await;
 
     utils::assert_all_known(&five, 4).await;
 

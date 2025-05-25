@@ -23,11 +23,7 @@ pub enum Message {
         count: u64,
         thin: bool,
         version: Version,
-    },
-    KeepAlive {
-        pubkey: PubKeyBytes,
-        count: u64,
-        sign: SignBytes,
+        known: Vec<PubKeyBytes>,
     },
     ShareData {
         data: Data,
@@ -48,31 +44,37 @@ pub enum Message {
     IntroduceNeighbours {
         neighbours: Vec<(PubKeyBytes, String)>,
     },
+    Announce {
+        pubkey: PubKeyBytes,
+    },
+    Leave {
+        pubkey: PubKeyBytes,
+    },
 }
 
 impl Message {
-    pub fn keepalive(pubkey: &PubKeyBytes, prikey: &SecretKey, count: u64) -> Self {
-        let signer = SigningKey::from(prikey);
-        let sign: Signature = signer.sign(&count.to_le_bytes());
-        let sign_bytes = sign.to_bytes();
+    // pub fn keepalive(pubkey: &PubKeyBytes, prikey: &SecretKey, count: u64) -> Self {
+    //     let signer = SigningKey::from(prikey);
+    //     let sign: Signature = signer.sign(&count.to_le_bytes());
+    //     let sign_bytes = sign.to_bytes();
 
-        Self::KeepAlive {
-            pubkey: *pubkey,
-            count,
-            sign: sign_bytes,
-        }
-    }
+    //     Self::KeepAlive {
+    //         pubkey: *pubkey,
+    //         count,
+    //         sign: sign_bytes,
+    //     }
+    // }
 
-    pub fn verify(&self) -> Result<bool> {
-        match self {
-            Self::KeepAlive { pubkey, count, sign } => {
-                let verifier = ex!(VerifyingKey::from_bytes(&pubkey[1..]), encrypt);
-                let signature = ex!(Signature::try_from(&sign[..]), encrypt);
-                ex!(verifier.verify(&count.to_le_bytes(), &signature), encrypt);
+    // pub fn verify(&self) -> Result<bool> {
+    //     match self {
+    //         Self::KeepAlive { pubkey, count, sign } => {
+    //             let verifier = ex!(VerifyingKey::from_bytes(&pubkey[1..]), encrypt);
+    //             let signature = ex!(Signature::try_from(&sign[..]), encrypt);
+    //             ex!(verifier.verify(&count.to_le_bytes(), &signature), encrypt);
 
-                Ok(true)
-            }
-            _ => Ok(false),
-        }
-    }
+    //             Ok(true)
+    //         }
+    //         _ => Ok(false),
+    //     }
+    // }
 }

@@ -49,8 +49,6 @@ pub struct Config {
     pub proxy: Option<Proxy>,
     /// The data folder where to save the blockchain.
     pub folder: PathBuf,
-    /// The time between keep alive updates.
-    pub keep_alive: Duration,
     /// How long to gather new data until a new block is generated.
     pub data_gather_time: Duration,
     /// A thin node does not participate in generating new blocks.
@@ -66,7 +64,6 @@ impl Default for Config {
             addr: ([0, 0, 0, 0], 29092).into(),
             proxy: None,
             folder: "data".into(),
-            keep_alive: Duration::from_millis(1900),
             data_gather_time: Duration::from_millis(750),
             thin: false,
             relationship: Relationship {

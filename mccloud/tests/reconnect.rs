@@ -13,15 +13,14 @@ async fn reconnect_1() {
 
     tokio::time::sleep(Duration::from_millis(250)).await;
 
-    let keepalive = peers[0].cfg.keep_alive;
     peers[1]
         .connect(peers[0].cfg.addr.into_target_addr().unwrap())
         .await
         .unwrap();
-    tokio::time::sleep(keepalive).await;
+    tokio::time::sleep(Duration::from_millis(250)).await;
 
     peers[0].shutdown().unwrap();
-    tokio::time::sleep(keepalive * 2).await;
+    tokio::time::sleep(Duration::from_millis(250)).await;
 
     let all_kn_cnt01 = peers[1].known_pubkeys().await.len();
 
@@ -51,15 +50,14 @@ async fn reconnect_2() {
 
     tokio::time::sleep(Duration::from_millis(250)).await;
 
-    let keepalive = peers[0].cfg.keep_alive;
     peers[1]
         .connect(peers[0].cfg.addr.into_target_addr().unwrap())
         .await
         .unwrap();
-    tokio::time::sleep(keepalive).await;
+    tokio::time::sleep(Duration::from_millis(250)).await;
 
     peers[1].shutdown().unwrap();
-    tokio::time::sleep(keepalive * 2).await;
+    tokio::time::sleep(Duration::from_millis(250)).await;
 
     tracing::info!("-- get known count --");
     let all_kn_cnt00 = peers[0].known_pubkeys().await.len();
@@ -70,14 +68,14 @@ async fn reconnect_2() {
 
     tracing::info!("-- start listening again --");
     peers[1] = Peer::new(peers[1].cfg.clone()).unwrap();
-    tokio::time::sleep(keepalive).await;
+    tokio::time::sleep(Duration::from_millis(250)).await;
 
     peers[1]
         .connect(peers[0].cfg.addr.into_target_addr().unwrap())
         .await
         .unwrap();
 
-    tokio::time::sleep(keepalive * 2).await;
+    tokio::time::sleep(Duration::from_millis(250)).await;
 
     let all_kn_cnt00 = peers[0].known_pubkeys().await.len();
     let all_kn_cnt01 = peers[1].known_pubkeys().await.len();
