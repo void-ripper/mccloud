@@ -9,6 +9,7 @@ use indexmap::IndexMap;
 use mccloud::{config::{Algorithm, Relationship, Config}, Peer, TargetAddr};
 use serde::{Deserialize, Serialize};
 use tokio::{net::TcpListener, sync::Mutex};
+use tower_http::trace::TraceLayer;
 
 type AppPtr = State<Arc<Mutex<App>>>;
 
@@ -24,8 +25,8 @@ impl App {
         for p in self.peers.values() {
             let data = PeerData {
                 id: p.pubhex(),
-                connections: p.client_pubkeys().await.into_iter().map(hex::encode).collect(),
                 all_known: p.known_pubkeys().await.into_iter().map(hex::encode).collect(),
+                connections: p.client_pubkeys().await.into_iter().map(hex::encode).collect(),
             };
             peers.push(data);
         }
@@ -173,7 +174,7 @@ async fn peer_blocks(state: AppPtr, Path(pubhex): Path<String>) -> Json<Vec<Bloc
 
 #[tokio::main]
 async fn main() {
-    tracing_subscriber::fmt().with_env_filter("info,mccloud=debug").init();
+    tracing_subscriber::fmt().with_env_filter("debug").init();
 
     let app = App {
         peers: IndexMap::new(),
@@ -187,6 +188,7 @@ async fn main() {
         .route("/api/share", post(peer_share))
         .route("/api/connect", post(peer_connect))
         .route("/api/blocks/{pubhex}", post(peer_blocks))
+        .layer(TraceLayer::new_for_http())
         .with_state(Arc::new(Mutex::new(app)));
 
     let listener = TcpListener::bind("127.0.0.1:3000").await.unwrap();

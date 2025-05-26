@@ -207,15 +207,20 @@ async function onFlake() {
     isFlaking.value = !isFlaking.value;
 
     if (isFlaking.value) {
-        flakeInterval.value = setInterval(async () => {
+        const sleep = async (t: number) =>
+            new Promise((reslove) => setTimeout(reslove, t));
+        const theFlaking = async () => {
+            let peers = peerList.value;
             for (let i = 0; i < flakies.value; i++) {
-                const len = Math.floor(Math.random() * peerList.value.length);
-                const p = peerList.value[len];
-                await fetch("/api/shutdown/" + p.id, {
+                const len = Math.floor(Math.random() * peers.length);
+                const p = peers[len];
+                const resp = await fetch("/api/shutdown/" + p.id, {
                     method: "POST",
                 });
+                peers = await resp.json();
             }
-            await list();
+
+            await sleep(300);
 
             const resp = await fetch("/api/create", {
                 method: "POST",
@@ -227,9 +232,11 @@ async function onFlake() {
             });
             const newones = await resp.json();
 
+            await sleep(300);
+
             for (let n of newones) {
-                const len = Math.floor(Math.random() * peerList.value.length);
-                const p = peerList.value[len];
+                const len = Math.floor(Math.random() * peers.length);
+                const p = peers[len];
 
                 await fetch("/api/connect", {
                     method: "POST",
@@ -239,7 +246,9 @@ async function onFlake() {
             }
 
             await list();
-        }, flakeTime.value);
+        };
+        await theFlaking();
+        flakeInterval.value = setInterval(theFlaking, flakeTime.value);
     } else {
         clearInterval(flakeInterval.value);
     }

@@ -3,7 +3,7 @@
 use std::{
     fmt::Display,
     future::Future,
-    net::ToSocketAddrs,
+    net::{SocketAddr, ToSocketAddrs},
     pin::Pin,
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -24,6 +24,7 @@ use k256::{
 };
 use message::Message;
 use tokio::{
+    io::AsyncWriteExt,
     net::{TcpListener, TcpStream},
     select,
     sync::{broadcast, mpsc, Mutex, RwLock},
@@ -71,7 +72,7 @@ pub struct Peer {
     prikey: SecretKey,
     pubkey: PubKeyBytes,
     pubhex: String,
-    to_accept: mpsc::Sender<(TargetAddr<'static>, u32)>,
+    to_accept: mpsc::Sender<(TargetAddr<'static>, u32, Option<PubKeyBytes>)>,
     last_block_tx: broadcast::Sender<Block>,
     to_shutdown: broadcast::Sender<bool>,
     clients: RwLock<Clients>,
@@ -161,6 +162,8 @@ impl Peer {
                 }
             }
         }
+
+        tracing::debug!("{} stop check block gathering", self.pubhex);
     }
 
     async fn establish_relationship(&self) -> Result<()> {
@@ -188,6 +191,8 @@ impl Peer {
             }
         }
 
+        tracing::debug!("{} stop checking relationships", self.pubhex);
+
         Ok(())
     }
 
@@ -212,7 +217,10 @@ impl Peer {
         Ok(())
     }
 
-    async fn listen(&self, mut to_accept: mpsc::Receiver<(TargetAddr<'static>, u32)>) -> Result<()> {
+    async fn listen(
+        &self,
+        mut to_accept: mpsc::Receiver<(TargetAddr<'static>, u32, Option<PubKeyBytes>)>,
+    ) -> Result<()> {
         tracing::info!("{} listen on {}", self.pubhex, self.cfg.addr);
 
         let listener = ex!(TcpListener::bind(self.cfg.addr).await, io);
@@ -223,28 +231,32 @@ impl Peer {
             addr: TargetAddr<'static>,
             sck: std::result::Result<TcpStream, E>,
             reconn_cnt: u32,
+            pubkey: Option<PubKeyBytes>,
         ) {
             match sck {
                 Ok(sck) => {
                     if let Err(e) = peer.accept(addr, sck, reconn_cnt).await {
-                        tracing::error!("{} {}", peer.pubhex, e);
+                        tracing::error!("{} while accepting: {}", peer.pubhex, e);
                     }
                 }
                 Err(e) => {
-                    tracing::error!("{} {}", peer.pubhex, e);
+                    tracing::error!("{} while connecting: {}", peer.pubhex, e);
+
+                    if let Some(pubkey) = pubkey {
+                        peer.trigger_leave(pubkey, addr, reconn_cnt);
+                    }
                 }
             }
         }
 
-        loop {
+        'main: loop {
             select! {
-                _ = rx_shutdown.recv() => { break; }
+                _ = rx_shutdown.recv() => { break 'main; }
                 addr = to_accept.recv() => {
-                    if let Some((addr, reconn_cnt)) = addr {
+                    if let Some((addr, reconn_cnt, pubkey)) = addr {
                         if let Some(proxy) = &self.cfg.proxy {
                             let res = Socks5Stream::connect(proxy.proxy, addr.to_owned()).await;
-                            accepting(self, addr, res.map(|e| e.into_inner()), reconn_cnt).await;
-
+                            accepting(self, addr, res.map(|e| e.into_inner()), reconn_cnt, pubkey).await;
                         }
                         else {
                             let raddr = addr.to_socket_addrs()
@@ -252,7 +264,7 @@ impl Peer {
                                 .and_then(|mut x| x.next().ok_or( Error::external(line!(),module_path!() ,"no socket address".into())));
                             match raddr {
                                 Ok(raddr) => {
-                                    accepting(self, addr, TcpStream::connect(raddr).await, reconn_cnt).await;
+                                    accepting(self, addr, TcpStream::connect(raddr).await, reconn_cnt, None).await;
                                 }
                                 Err(e) => {
                                     tracing::error!("{} {}", self.pubhex, e);
@@ -264,7 +276,7 @@ impl Peer {
                 res = listener.accept() => {
                     match res {
                         Ok((sck, addr)) => {
-                            accepting(self, TargetAddr::Ip(addr).to_owned(), Ok::<_, std::io::Error>(sck), 0).await;
+                            accepting(self, TargetAddr::Ip(addr).to_owned(), Ok::<_, std::io::Error>(sck), 0, None).await;
                         }
                         Err(e) => {
                             tracing::error!("{} {}", self.pubhex, e);
@@ -274,6 +286,7 @@ impl Peer {
             }
         }
 
+        self.clients.write().await.clear();
         tracing::info!("{} shutdown", self.pubhex);
 
         Ok(())
@@ -283,11 +296,6 @@ impl Peer {
         tracing::info!("{} accept {:?}", self.pubhex, addr);
 
         let (mut reader, mut writer) = sck.into_split();
-        // let mut clw = ClientWriter {
-        //     shared: None,
-        //     sck: writer,
-        //     tx_nonce: 0,
-        // };
 
         let (myroot, mylast, mycount, greeting) = {
             let blkch = self.blockchain.read().await;
@@ -398,7 +406,7 @@ impl Peer {
                 loop {
                     select! {
                         _ = rx_shutdown.recv() => {
-                            peer.clients.write().await.remove(&pubkey);
+                            //peer.clients.write().await.remove(&pubkey);
                             return;
                         }
                         msg = reader.read() => {
@@ -427,25 +435,7 @@ impl Peer {
                 );
                 peer.clients.write().await.remove(&pubkey);
                 // peer.known.lock().await.swap_remove(&pubkey);
-
-                if reconn_cnt > 0 {
-                    tracing::debug!(
-                        "{} attempt reconnect\n{} {}",
-                        peer.pubhex,
-                        hex::encode(&pubkey),
-                        target_addr_to_string(addr.to_owned())
-                    );
-                    tokio::time::sleep(peer.cfg.relationship.reconnect).await;
-                    if !peer.to_accept.is_closed() {
-                        if let Err(e) = peer.to_accept.send((addr, reconn_cnt - 1)).await {
-                            tracing::error!("{} {}", peer.pubhex, e);
-                        }
-                    }
-                } else {
-                    if let Err(e) = peer.broadcast(Message::Leave { pubkey }).await {
-                        tracing::error!("{} sent leave: {}", peer.pubhex, e);
-                    }
-                }
+                peer.trigger_leave(pubkey, addr, reconn_cnt);
             });
         } else {
             return Err(Error::protocol(
@@ -456,6 +446,32 @@ impl Peer {
         }
 
         Ok(())
+    }
+
+    fn trigger_leave(&self, pubkey: PubKeyBytes, addr: TargetAddr<'static>, reconn_cnt: u32) {
+        let peer = self.me.upgrade().unwrap();
+        tokio::spawn(async move {
+            if reconn_cnt > 0 {
+                tokio::time::sleep(peer.cfg.relationship.reconnect).await;
+                tracing::debug!(
+                    "{} attempt reconnect\n{} {}",
+                    peer.pubhex,
+                    hex::encode(&pubkey),
+                    target_addr_to_string(addr.to_owned())
+                );
+                if !peer.to_accept.is_closed() {
+                    if let Err(e) = peer.to_accept.send((addr, reconn_cnt - 1, Some(pubkey.clone()))).await {
+                        tracing::error!("{} {}", peer.pubhex, e);
+                    }
+                }
+            } else {
+                tracing::debug!("{} sent leave: {}", peer.pubhex, hex::encode(&pubkey));
+                peer.known.write().await.remove(&pubkey);
+                if let Err(e) = peer.broadcast(Message::Leave { pubkey }).await {
+                    tracing::error!("{} sent leave: {}", peer.pubhex, e);
+                }
+            }
+        });
     }
 
     async fn create_next_block(&self, blkch: &mut Blockchain) -> Result<Block> {
@@ -757,7 +773,7 @@ impl Peer {
                 if !self.clients.read().await.contains_key(&k) {
                     ex!(
                         self.to_accept
-                            .send((ex!(n.into_target_addr(), sync), self.cfg.relationship.retry))
+                            .send((ex!(n.into_target_addr(), sync), self.cfg.relationship.retry, None))
                             .await,
                         sync
                     );
@@ -828,7 +844,10 @@ impl Peer {
     /// Try to connect to another peer.
     pub async fn connect(&self, addr: TargetAddr<'static>) -> Result<()> {
         tracing::info!("{} connect to {:?}", self.pubhex, addr);
-        ex!(self.to_accept.send((addr, self.cfg.relationship.retry)).await, sync);
+        ex!(
+            self.to_accept.send((addr, self.cfg.relationship.retry, None)).await,
+            sync
+        );
         Ok(())
     }
 
@@ -856,6 +875,8 @@ impl Peer {
     pub fn shutdown(&self) -> Result<()> {
         if self.to_shutdown.receiver_count() > 0 {
             ex!(self.to_shutdown.send(true), sync);
+        } else {
+            tracing::warn!("{} shutdown for no receivers", self.pubhex);
         }
         Ok(())
     }
