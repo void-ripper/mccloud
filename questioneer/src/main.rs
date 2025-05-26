@@ -42,8 +42,8 @@ impl App {
                 data_gather_time: Duration::from_millis(800),
                 thin,
                 relationship: Relationship {
-                    time: Duration::from_millis(5000),
-                    reconnect: Duration::from_millis(5000),
+                    time: Duration::from_millis(1000),
+                    reconnect: Duration::from_millis(2000),
                     count: 2,
                     retry: 3,
                 },
