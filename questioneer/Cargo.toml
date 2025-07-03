@@ -11,10 +11,10 @@ panic = "abort"
 [dependencies]
 axum = "0.8.4"
 hex = "0.4.3"
-indexmap = "2.9.0"
+indexmap = "2.10.0"
 mccloud = { path = "../mccloud" }
 serde = { version = "1.0.219", features = ["derive"] }
-tokio = { version = "1.45.1", features = ["full"] }
+tokio = { version = "1.46.0", features = ["full"] }
 tower-http = { version = "0.6.6", features = ["trace"] }
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }

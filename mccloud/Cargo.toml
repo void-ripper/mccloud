@@ -21,7 +21,7 @@ hex = "0.4.3"
 k256 = { version = "0.13.4", features = ["ecdh", "ecdsa"] }
 rand = "0.9.1"
 serde = { version = "1.0.219", features = ["derive"], optional = true }
-tokio = { version = "1.45.1", features = ["full"] }
+tokio = { version = "1.46.0", features = ["full"] }
 tokio-socks = "0.5.2"
 tracing = "0.1.41"
 zstd = "0.13.3"

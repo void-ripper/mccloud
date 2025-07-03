@@ -15,6 +15,6 @@ default = []
 [dependencies]
 clap = { version = "4.5.40", features = ["derive"] }
 mccloud = { path = "../mccloud" }
-tokio = { version = "1.45.1", features = ["full"] }
+tokio = { version = "1.46.0", features = ["full"] }
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
