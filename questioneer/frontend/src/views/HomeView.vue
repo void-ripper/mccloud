@@ -41,10 +41,13 @@ Modal(title="Connect To" :show="showConnect" @close="showConnect = false" @ok="p
             table.table.is-narrow
                 thead
                     tr
-                      th peer ({{peerList.length}})
-                tbody.mono
+                      th peers ({{peerList.length}})
+                      th
+                tbody
                     tr(v-for="ns in peerList")
-                        td(@click="onClick(ns)" :class="{'is-selected': ns.id == target.id}") {{ ns.id }}
+                        td(@click="onClick(ns)" :class="{'is-selected': ns.id == target.id}").mono {{ ns.id }}
+                        td
+                          span(v-if="isFlaky(ns.id)").ml-1.tag.is-info F
 
         .columns
             .column
@@ -84,6 +87,7 @@ const showConnect = ref(false);
 const target = ref<Peer>({ id: "", connections: [], all_known: [] });
 const toConnect = ref([] as string[]);
 const msgToShare = ref("");
+const flakerList = ref([] as Peer[]);
 const flakies = ref(1);
 const flakeTime = ref(30000);
 const isFlaking = ref(false);
@@ -126,6 +130,7 @@ async function onSpawn() {
         body: JSON.stringify({
             thin: false,
             count: spawnCount.value,
+            all: true,
         }),
     });
     peerList.value = await resp.json();
@@ -203,21 +208,20 @@ async function onBlocks() {
     blocks.value = await resp.json();
 }
 
+function isFlaky(id: stirng) {
+    return flakerList.value.findIndex(n => n.id === id) !== -1
+}
+
 async function onFlake() {
     isFlaking.value = !isFlaking.value;
 
     if (isFlaking.value) {
-        const sleep = async (t: number) =>
-            new Promise((reslove) => setTimeout(reslove, t));
+        const sleep = async (t: number) => new Promise((reslove) => setTimeout(reslove, t));
         const theFlaking = async () => {
-            let peers = peerList.value;
-            for (let i = 0; i < flakies.value; i++) {
-                const len = Math.floor(Math.random() * peers.length);
-                const p = peers[len];
+            for (let p of flakerList.value) {
                 const resp = await fetch("/api/shutdown/" + p.id, {
                     method: "POST",
                 });
-                peers = await resp.json();
             }
 
             await sleep(300);
@@ -228,6 +232,7 @@ async function onFlake() {
                 body: JSON.stringify({
                     thin: false,
                     count: flakies.value,
+                    all: false,
                 }),
             });
             const newones = await resp.json();
@@ -235,8 +240,8 @@ async function onFlake() {
             await sleep(300);
 
             for (let n of newones) {
-                const len = Math.floor(Math.random() * peers.length);
-                const p = peers[len];
+                const len = Math.floor(Math.random() * peerList.value.length);
+                const p = peerList.value[len];
 
                 await fetch("/api/connect", {
                     method: "POST",
@@ -245,6 +250,7 @@ async function onFlake() {
                 });
             }
 
+            flakerList.value = newones;
             await list();
         };
         await theFlaking();

@@ -34,7 +34,8 @@ impl App {
         peers
     }
 
-    async fn spawn_peers(&mut self, thin: bool, count: u32) -> Vec<PeerData> {
+    async fn spawn_peers(&mut self, thin: bool, count: u32, all: bool) -> Vec<PeerData> {
+        let mut new_ones = Vec::new();
         for _ in 0..count {
             let cfg = Config {
                 addr: ([127, 0, 0, 1], self.port_pool).into(),
@@ -59,6 +60,9 @@ impl App {
 
             match p {
                 Ok(p) => {
+                    if !all {
+                        new_ones.push(p.clone());
+                    }
                     self.peers.insert(p.pubhex(), p);
                 }
                 Err(e) => {
@@ -67,7 +71,23 @@ impl App {
             }
         }
 
-        self.list().await
+        if all {
+            self.list().await
+        }
+        else {
+            let mut peers = Vec::new();
+
+            for p in new_ones {
+                let data = PeerData {
+                    id: p.pubhex(),
+                    all_known: p.known_pubkeys().await.into_iter().map(hex::encode).collect(),
+                    connections: p.client_pubkeys().await.into_iter().map(hex::encode).collect(),
+                };
+                peers.push(data);
+            }
+
+            peers
+        }
     }
 
     fn delete_peer(&mut self, pubkey: &str) {
@@ -99,10 +119,11 @@ async fn peer_list(state: AppPtr) -> Json<Vec<PeerData>> {
 pub struct CreateData {
     pub thin: bool,
     pub count: u32,
+    pub all: bool,
 }
 
 async fn peer_create(state: AppPtr, data: Json<CreateData>) -> Json<Vec<PeerData>> {
-    let data = state.lock().await.spawn_peers(data.thin, data.count).await;
+    let data = state.lock().await.spawn_peers(data.thin, data.count, data.all).await;
     Json(data)
 }
 
