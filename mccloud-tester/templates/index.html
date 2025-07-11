@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <link rel="icon" href="/favicon.ico">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>mccloud-tester</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@1.0.4/css/bulma.min.css" >
+  </head>
+  <body>
+    <header class="container">
+      <nav class="navbar">
+        <div class="navbar-brand">
+          <div class="navbar-item is-size-3">McCloud</div>
+        </div>
+        <div class="navbar-menu">
+          <div class="navbar-start">
+            <div class="navbar-item" to="/">Home</div>
+          </div>
+        </div>
+      </nav>
+    </header>
+
+    <main class="container">
+
+      <div class="columns is-centered mt-5">
+        <div class="column is-two">
+          <form method="post">
+            <div class="field has-addons">
+                <div class="control">
+                  <input class="input" type="number" name="spawn_count" value="{{ spawn_count }}">
+                </div>
+                <div class="control">
+                  <button class="button is-info"formaction="/create">create</button>
+                </div>
+            </div>
+
+            <div class="field has-addons">
+              <div class="control">
+                <input class="input" type="text" name="msg_to_share">
+              </div>
+              <div class="control">
+                <button class="button" formaction="/share">share</button>
+              </div>
+            </div>
+
+            <div class="field has-addons">
+              <div class="control">
+                <input class="input" type="number" step="1000" name="flake_time" value="{{ flake_time }}">
+              </div>
+              <div class="control">
+                <input class="input" type="number" name="flakies" value="{{ flakies.len() }}">
+              </div>
+              <div class="control">
+                <button class="button" formaction="/flake" {% if is_flaking %}class="is-primary"{% endif %}>flake</button>
+              </div>
+            </div>
+
+            <div class="buttons">
+              <button class="button" formaction="/"> refresh</button>
+              <button class="button" @click="onConnect()"> connect</button>
+              <button class="button" formaction="/circle-connect"> circle connect</button>
+              <button class="button" formaction="/shutdown-all"> shutdown all</button>
+              <!-- <button class="button" @click="onShutdown()"> shutdown</button> -->
+            </div>
+          </form>
+
+          <div class="table-container scroll">
+            <form method="post">
+              <table class="table is-narrow">
+                <thead>
+                  <tr>
+                    <th>peers ({{ peers.len() }})</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody class="mono">
+                  {% for ns in flakies %}
+                  <tr class="if-info">
+                    <td @click="onClick(ns)" {% if is_selected(ns) %}class="is-selected"{% endif %}>
+                     {{ ns.id }}
+                    </td>
+                    <td>
+                      <span class="tag is-danger is-delete"></span>
+                    </td>
+                  </tr>
+                  {% endfor %}
+
+                  {% for ns in peers %}
+                  <tr>
+                    <td @click="onClick(ns)" {% if is_selected(ns) %}class="is-selected"{% endif %}>
+                     {{ ns.id }}
+                    </td>
+                    <td>
+                      <span class="tag is-danger is-delete"></span>
+                    </td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </form>
+          </div>
+
+          <div class="columns">
+            <div class="column">
+                {% if let Some(t) = target %}
+                <div class="box content">
+                    <h5>
+                      all known [{{ t.all_known.len() }}]
+                    </h5>
+                    <div class="scroll">
+                      <ul class="mono">
+                        {% for id in t.all_known %}
+                        <li>{{ id[0..12] }}</li>
+                        {% endfor %}
+                      </ul>
+                    </div>
+                </div>
+                <div class="box content">
+                    <h5>connections [{{ t.connections.len() }}]</h5>
+                    <div class="scroll">
+                      <ul class="mono">
+                        {% for id in t.connections %}
+                        <li>{{ id[0..12] }}</li>
+                        {% endfor %}
+                      </ul>
+                    </div>
+                </div>
+                {% endif %}
+            </div>
+
+            <div class="column">
+              {% if target.is_some() %}
+              <div class="box content">
+                <h5>blocks</h5>
+                  <ol class="mono">
+                    {% for blk in blocks %}
+                      <li>
+                        {{ blk.hash[0..12] }}: {{ blk.author[0..12] }}
+                        <ol>
+                          {% for n in blk.next_authors %}
+                          <li>{{ n[0..12] }}</li>
+                          {% endfor %}
+                        </ol>
+                        <ul>
+                          {% for d in blk.data %}
+                          <li>{{ d }}</li>
+                          {% endfor %}
+                        </ul>
+                      </li>
+                    {% endfor %}
+                  </ol>
+              </div>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+        <div class="column">
+          {% include "layoutd3.html" %}
+        </div>
+      </div>
+    </main>
+  </body>
+</html>
+
