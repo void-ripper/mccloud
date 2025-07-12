@@ -26,6 +26,16 @@ pub struct PeerData {
     all_known: Vec<String>,
 }
 
+impl PeerData {
+    pub async fn from(p: &Arc<Peer>) -> Self {
+        PeerData {
+            id: p.pubhex(),
+            all_known: p.known_pubkeys().await.into_iter().map(hex::encode).collect(),
+            connections: p.client_pubkeys().await.into_iter().map(hex::encode).collect(),
+        }
+    }
+}
+
 pub struct BlockData {
     pub hash: String,
     pub data: Vec<String>,
@@ -45,11 +55,7 @@ impl App {
         let mut peers = Vec::new();
 
         for p in self.peers.values() {
-            let data = PeerData {
-                id: p.pubhex(),
-                all_known: p.known_pubkeys().await.into_iter().map(hex::encode).collect(),
-                connections: p.client_pubkeys().await.into_iter().map(hex::encode).collect(),
-            };
+            let data = PeerData::from(p).await;
             peers.push(data);
         }
 
@@ -92,11 +98,7 @@ impl App {
         }
 
         for p in new_ones {
-            let data = PeerData {
-                id: p.pubhex(),
-                all_known: p.known_pubkeys().await.into_iter().map(hex::encode).collect(),
-                connections: p.client_pubkeys().await.into_iter().map(hex::encode).collect(),
-            };
+            let data = PeerData::from(&p).await;
             self.site.peers.push(data);
         }
     }
@@ -121,38 +123,72 @@ async fn index(state: AppPtr) -> impl IntoResponse {
 }
 
 #[derive(Deserialize)]
-pub struct CreateData {
+pub struct FormData {
     pub spawn_count: u32,
     pub msg_to_share: String,
     pub flake_time: u32,
     pub flakies: u32,
 }
 
-async fn peer_create(state: AppPtr, data: Form<CreateData>) -> impl IntoResponse {
+async fn peer_create(state: AppPtr, data: Form<FormData>) -> impl IntoResponse {
     let mut app = state.lock().await;
     app.site.spawn_count = data.spawn_count;
     app.spawn_peers(data.spawn_count).await;
     Redirect::to("/")
 }
 
-async fn peer_shutdown(state: AppPtr, Path(pubhex): Path<String>) -> impl IntoResponse {
-    state.lock().await.delete_peer(&pubhex);
+async fn peer_select(state: AppPtr, Path(pubhex): Path<String>) -> impl IntoResponse {
+    let mut app = state.lock().await;
+    let sel = app.peers.get(&pubhex).or(app.flakies.get(&pubhex));
+
+    if let Some(sel) = sel {
+        app.site.target = Some(PeerData::from(sel).await);
+    }
+
     Redirect::to("/")
 }
 
-#[derive(Deserialize)]
-pub struct Share {
-    pub id: String,
-    pub msg: String,
-}
-
-async fn peer_share(state: AppPtr, Json(share): Json<Share>) {
+async fn circle_connect(state: AppPtr) -> impl IntoResponse {
     let app = state.lock().await;
-    if let Some(p) = app.peers.get(&share.id) {
-        if let Err(e) = p.share(share.msg.into_bytes()).await {
+
+    for i in 1..app.peers.len() {
+        let p0 = &app.peers[i - 1];
+        let p1 = &app.peers[i];
+
+        if let Err(e) = p0.connect(TargetAddr::Ip(p1.cfg.addr)).await {
             tracing::error!("{e}");
         }
     }
+
+    let p0 = &app.peers[app.peers.len() - 1];
+    let p1 = &app.peers[0];
+
+    if let Err(e) = p0.connect(TargetAddr::Ip(p1.cfg.addr)).await {
+        tracing::error!("{e}");
+    }
+
+    Redirect::to("/")
+}
+
+async fn peer_shutdown(state: AppPtr, Path(pubhex): Path<String>) -> impl IntoResponse {
+    let mut app = state.lock().await;
+    app.delete_peer(&pubhex);
+    app.site.target.take_if(|n| n.id == pubhex);
+    Redirect::to("/")
+}
+
+async fn peer_share(state: AppPtr, Form(share): Form<FormData>) -> impl IntoResponse {
+    let app = state.lock().await;
+    if let Some(target) = &app.site.target {
+        let sel = app.peers.get(&target.id).or(app.flakies.get(&target.id));
+        if let Some(p) = sel {
+            if let Err(e) = p.share(share.msg_to_share.into_bytes()).await {
+                tracing::error!("{e}");
+            }
+        }
+    }
+
+    Redirect::to("/")
 }
 
 #[derive(Deserialize)]
@@ -214,6 +250,8 @@ async fn main() {
     let router = Router::new()
         .route("/", get(index))
         .route("/create", post(peer_create))
+        .route("/select/{pubhex}", post(peer_select))
+        .route("/circle-connect", post(circle_connect))
         .route("/shutdown/{pubhex}", post(peer_shutdown))
         .route("/share", post(peer_share))
         .route("/connect", post(peer_connect))

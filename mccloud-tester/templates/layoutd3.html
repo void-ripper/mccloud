@@ -2,8 +2,8 @@
 <script type="module">
 import * as d3 from "https://cdn.jsdelivr.net/npm/d3@7/+esm";
 
-const peers = {{ peers|json }};
-const flakies = {{ flakies|json }};
+const peers = {{ peers|json|safe }};
+const flakies = {{ flakies|json|safe }};
 const width = 800;
 const height = 600;
 const color = d3.scaleOrdinal(d3.schemeCategory10);
@@ -85,7 +85,7 @@ const setup = () => {
         if (!event.active) simulation.alphaTarget(0.3).restart();
         event.subject.fx = event.subject.x;
         event.subject.fy = event.subject.y;
-        emits("pick", event.subject.id)
+        // emits("pick", event.subject.id)
     }
 
     // Update the subject (dragged node) position during drag.
@@ -108,11 +108,12 @@ const setup = () => {
     //   invalidation.then(() => simulation.stop());
 
     const el = svg.node();
-    const parent = document.getElemebtById("parent")
+    const parent = document.getElementById("parent")
     if (parent.childElementCount > 0) {
         parent.removeChild(parent.childNodes[0])
     }
     parent.appendChild(el);
 
 }
+setup()
 </script>

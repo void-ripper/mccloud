@@ -77,22 +77,24 @@
                 <tbody class="mono">
                   {% for ns in flakies %}
                   <tr class="if-info">
-                    <td @click="onClick(ns)" {% if is_selected(ns) %}class="is-selected"{% endif %}>
-                     {{ ns.id }}
+                    <td>
+                     <button {% if is_selected(ns) %}class="has-background-primary"{% endif %} formaction="/select/{{ ns.id }}">{{ ns.id }}</button>
                     </td>
                     <td>
-                      <span class="tag is-danger is-delete"></span>
+                      <button formaction="/shutdown/{{ ns.id }}" class="tag is-danger is-delete"></button>
                     </td>
                   </tr>
                   {% endfor %}
 
                   {% for ns in peers %}
                   <tr>
-                    <td @click="onClick(ns)" {% if is_selected(ns) %}class="is-selected"{% endif %}>
-                     {{ ns.id }}
+                    <td>
+                     <button {% if is_selected(ns) %}class="has-background-primary"{% endif %} formaction="/select/{{ ns.id }}">
+                      {{ ns.id }}
+                    </button>
                     </td>
                     <td>
-                      <span class="tag is-danger is-delete"></span>
+                      <button formaction="/shutdown/{{ ns.id }}" class="tag is-danger is-delete"></button>
                     </td>
                   </tr>
                   {% endfor %}
@@ -105,9 +107,7 @@
             <div class="column">
                 {% if let Some(t) = target %}
                 <div class="box content">
-                    <h5>
-                      all known [{{ t.all_known.len() }}]
-                    </h5>
+                    <h5> all known [{{ t.all_known.len() }}] </h5>
                     <div class="scroll">
                       <ul class="mono">
                         {% for id in t.all_known %}
